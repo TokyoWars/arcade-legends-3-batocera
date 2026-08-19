@@ -21,7 +21,7 @@ start)
     (
         while true; do
 
-            # Wait for the original AL3 FTDI board
+            # Wait for the controller's FTDI serial device
             while [ ! -c /dev/ttyUSB0 ]; do
                 sleep 1
             done
