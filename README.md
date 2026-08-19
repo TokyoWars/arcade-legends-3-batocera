@@ -4,133 +4,297 @@ This project documents the conversion of a **Chicago Gaming Company Arcade Legen
 
 ![Arcade Legends 3 cabinet running Batocera](images/Console.jpeg)
 
-The original game computer was replaced by a laptop running Batocera, but the cabinet itself remains largely original. The conversion keeps the CRT, control panel, joysticks, buttons, trackball, speakers, wiring, and original controller/interface electronics.
+The original game computer was replaced by a laptop running Batocera, but the cabinet itself remains largely original.
+
+The conversion keeps the original CRT, control panel, joysticks, buttons, trackball, speakers, wiring, and controller/interface electronics.
 
 The goal was simple:
 
-> Modernize the game platform without unnecessarily replacing the arcade machine around it.
+> **Modernize the game platform without unnecessarily replacing the arcade machine around it.**
 
-## What was preserved
+---
 
-The project keeps the original cabinet and artwork, original CRT monitor, original two-player control panel, original joysticks and buttons, original trackball, original speakers and audio path, original cabinet wiring, and original controller/interface electronics.
+## What Was Preserved
 
-The original motherboard is no longer used as the game computer. Batocera now runs on a laptop connected to the cabinet.
+The project retains:
+
+- Original Arcade Legends cabinet and artwork
+- Original CRT monitor
+- Original two-player control panel
+- Original joysticks and buttons
+- Original trackball
+- Original speakers and audio path
+- Original cabinet wiring
+- Original controller/interface electronics
+
+The original motherboard is no longer used as the game computer.
+
+Batocera now runs on a laptop connected to the existing cabinet hardware.
 
 For the full physical conversion with photos, see:
 
 **[Hardware Conversion](docs/hardware.md)**
 
-## How the conversion works
+---
+
+## How the Conversion Works
 
 The original Arcade Legends controls do not appear to Linux as standard USB gamepads.
 
-The cabinet controller is connected to the Batocera laptop by USB. Linux detects the controller's FTDI serial interface as:
+The cabinet controller/interface connects to the Batocera laptop by USB.
 
-    FT232R USB UART
-    /dev/ttyUSB0
+Linux detects its FTDI serial interface as:
+
+```text
+FT232R USB UART
+/dev/ttyUSB0
+```
 
 The verified serial configuration is:
 
-    115200 8N1
+```text
+115200 8N1
+```
 
-A custom Python bridge reads the Arcade Legends controller data and converts it into standard Linux UInput devices.
+The Arcade Legends controller sends 19-byte packets framed by:
 
-    Original controls and trackball
-                ↓
-    Original Arcade Legends controller/interface
-                ↓
-    USB connection
-                ↓
-    FTDI serial interface
-    /dev/ttyUSB0
-                ↓
-    al3_bridge.py
-                ↓
-    AL3 Player 1
-    AL3 Player 2
-    AL3 Trackball
-    AL3 Hotkeys
-                ↓
-    Linux input
-                ↓
-    SDL / Batocera / MAME
+```text
+0x5A ... 0xA5
+```
 
-The main bridge script is:
+A custom Python bridge reads those packets and converts the original controls into standard Linux UInput devices.
 
-    scripts/al3_bridge.py
+```text
+Original controls and trackball
+            ↓
+Original Arcade Legends controller/interface
+            ↓
+USB connection
+            ↓
+FTDI serial interface
+/dev/ttyUSB0
+            ↓
+al3_bridge.py
+            ↓
+AL3 Player 1
+AL3 Player 2
+AL3 Trackball
+AL3 Hotkeys
+            ↓
+Linux input
+            ↓
+SDL / Batocera / MAME
+```
+
+The working bridge is included in:
+
+```text
+scripts/al3_bridge.py
+```
 
 On the cabinet it is installed as:
 
-    /userdata/system/al3_bridge.py
+```text
+/userdata/system/al3_bridge.py
+```
+
+---
 
 ## Controls
 
-The original two-player controls remain in use.
+The original two-player control panel remains in use.
 
-The bridge creates separate virtual controllers for Player 1 and Player 2 and also creates dedicated trackball and hotkey devices.
+The bridge creates:
 
-The existing player buttons provide both Start and Coin without adding any new physical buttons:
+```text
+AL3 Player 1
+AL3 Player 2
+AL3 Trackball
+AL3 Hotkeys
+```
 
-    Tap player button
-    → START
+### Start and Coin
 
-    Hold for approximately one second
-    → SELECT / COIN
+No additional Coin buttons were added to the cabinet.
+
+The original player buttons provide two functions:
+
+```text
+Tap player button
+→ START
+
+Hold for approximately one second
+→ SELECT / COIN
+```
 
 The verified SDL mappings are:
 
-    Button 6 → SELECT / COIN
-    Button 7 → START
+```text
+Button 6 → SELECT / COIN
+Button 7 → START
+```
 
-The original trackball is translated to relative Linux mouse movement using:
+This keeps the original control panel intact without drilling additional holes.
 
-    REL_X
-    REL_Y
+---
 
-This allows the original trackball to work with Batocera and MAME and also provides the relative input needed by certain dial/spinner-style games.
+## Cabinet Volume Control
 
-More detail is available here:
+The original cabinet EXIT button also doubles as a volume-control modifier.
+
+The verified working behavior is:
+
+```text
+EXIT
+→ Exit current game
+
+EXIT + Player 1 UP
+→ Volume Up
+
+EXIT + Player 1 DOWN
+→ Volume Down
+```
+
+The bridge emits standard Linux multimedia keys:
+
+```text
+KEY_VOLUMEUP
+KEY_VOLUMEDOWN
+```
+
+The first volume adjustment occurs immediately.
+
+If the joystick direction remains held, volume repeat begins after approximately:
+
+```text
+0.35 seconds
+```
+
+and then repeats approximately every:
+
+```text
+0.12 seconds
+```
+
+While EXIT is being used as the volume modifier, Player 1 vertical joystick movement is suppressed.
+
+This prevents the game from receiving an Up or Down command while changing volume.
+
+If EXIT was used for volume control, releasing it does **not** exit the game.
+
+EXIT by itself exits through Batocera using:
+
+```text
+hotkeygen --send exit
+```
+
+This allows full cabinet volume control without adding dedicated volume buttons or changing the original control panel.
+
+For the complete control implementation, see:
 
 **[Controls](docs/controls.md)**
 
-## Automatic startup
+---
 
-The controller bridge starts automatically using Batocera's service mechanism.
+## Trackball
+
+The original Arcade Legends trackball remains connected through the original controller/interface electronics.
+
+The bridge converts its movement into Linux relative mouse events:
+
+```text
+REL_X
+REL_Y
+```
+
+The working cabinet configuration applies a **2× sensitivity multiplier** to the raw trackball movement:
+
+```python
+dx = signed7(pkt[5]) * 2
+dy = signed7(pkt[6]) * 2
+```
+
+This was the sensitivity that worked correctly on this cabinet.
+
+The multiplier can be adjusted in `al3_bridge.py` if a different trackball speed is preferred.
+
+The relative input also provides the input path needed by certain trackball, dial, and spinner-style games.
+
+---
+
+## Automatic Startup
+
+The AL3 controller bridge starts automatically using Batocera's service mechanism.
 
 The repository includes:
 
-    services/AL3_Bridge
+```text
+services/AL3_Bridge
+```
 
 On the cabinet it is installed as:
 
-    /userdata/system/services/AL3_Bridge
+```text
+/userdata/system/services/AL3_Bridge
+```
 
-The service waits for `/dev/ttyUSB0`, starts the bridge, logs activity, and restarts the bridge if it exits.
+The service:
 
-The project also includes:
+1. waits for `/dev/ttyUSB0`
+2. starts the Python bridge
+3. logs its output
+4. restarts the bridge if it exits
 
-    services/Force_Headphones
+This avoids startup timing problems if the controller interface is not immediately available when Batocera boots.
 
-This forces the required analog audio output after boot. The sink name in that service is specific to the Batocera laptop used in this build and may need to be changed on another system.
+---
 
-## Video and audio
+## Video and Audio
 
-The Batocera laptop connects to the original cabinet through three main paths:
+The Batocera laptop connects to the cabinet through three primary paths:
 
-    USB
-    → original controller/interface electronics
+```text
+USB
+→ original controller/interface electronics
 
-    VGA
-    → original CRT video path
+VGA
+→ original CRT video path
 
-    Analog audio
-    → original cabinet audio path
+Analog audio
+→ original cabinet audio path
+```
 
-The original CRT remains in use, as do the original cabinet speakers.
+The original CRT remains in use.
 
-This was an important part of the conversion because it preserves the original look and feel of the machine instead of turning it into a generic LCD-based arcade cabinet.
+The original cabinet speakers and audio system also remain in use.
 
-## Game-specific examples
+This was an important part of the conversion because the objective was to retain the look and feel of the original Arcade Legends cabinet instead of converting it into a generic LCD-based arcade machine.
+
+---
+
+## Audio Output Service
+
+Batocera did not always select the required analog output automatically after boot.
+
+The project therefore includes:
+
+```text
+services/Force_Headphones
+```
+
+This forces the required:
+
+```text
+analog-output-headphones
+```
+
+port on the configured audio sink.
+
+The sink name included in the service is specific to the Batocera computer used in this build and may need to be changed on another system.
+
+---
+
+## Game-Specific Examples
 
 The project avoids changing global emulator settings to solve problems that affect only one game.
 
@@ -138,37 +302,45 @@ Instead, game-specific fixes are applied only where needed.
 
 ### Tempest
 
-Tempest is an example of a game that required relative mouse input to support its dial/spinner-style controls.
+Tempest is an example of a game that required relative mouse input for its dial/spinner-style control.
 
 The working configuration is:
 
-    mame["tempest.zip"].core=mame
-    mame["tempest.zip"].emulator=libretro
-    mame["tempest.zip"].retroarchcore.mame_mouse_enable=enabled
+```text
+mame["tempest.zip"].core=mame
+mame["tempest.zip"].emulator=libretro
+mame["tempest.zip"].retroarchcore.mame_mouse_enable=enabled
+```
 
 ### Pac-Man and Frogger
 
-Pac-Man and Frogger are examples of games that required custom CRT viewport settings because the default image was too large for the visible area of this cabinet's CRT.
+Pac-Man and Frogger are examples of games that required custom viewport settings because the default image was larger than the usable visible area of this cabinet's CRT.
 
-The working viewport used on this cabinet is:
+The working viewport on this cabinet is:
 
-    335 x 447
+```text
+335 x 447
+```
 
-Those values are specific to this machine and should be treated as examples rather than universal settings.
+Those dimensions are specific to this machine and should be treated as an example rather than a universal setting.
 
-The important rule is:
+The general rule used throughout the project is:
 
-> If the problem exists in one game, fix one game. If it exists everywhere, fix the global configuration.
+> **If the problem exists in one game, fix one game. If it exists everywhere, fix the global configuration.**
 
-The verified examples are documented here:
+The verified examples are documented in:
 
 **[Game-Specific Fixes](docs/game-fixes.md)**
 
 The repository also includes:
 
-    config/game-overrides.conf
+```text
+config/game-overrides.conf
+```
 
 with the current verified per-game overrides.
+
+---
 
 ## Installation
 
@@ -178,65 +350,154 @@ For the condensed setup procedure, see:
 
 The installation guide covers:
 
-1. verifying the controller connection
+1. verifying the original controller interface
 2. installing the AL3 bridge
-3. installing the Batocera service
-4. updating the EmulationStation Start/Select mappings
-5. verifying controller input with Linux and SDL tools
-6. configuring the audio output
-7. applying game-specific overrides where needed
+3. installing and enabling the Batocera service
+4. updating EmulationStation Start/Select mappings
+5. verifying input with Linux and SDL tools
+6. configuring the cabinet audio output
+7. applying per-game overrides where needed
 
-## Important Batocera paths
+---
+
+## Important Batocera Paths
 
 The main persistent files used by this project are:
 
-    /userdata/system/al3_bridge.py
-    /userdata/system/al3_bridge.log
-    /userdata/system/services/AL3_Bridge
-    /userdata/system/services/Force_Headphones
-    /userdata/system/configs/emulationstation/es_input.cfg
-    /userdata/system/batocera.conf
+```text
+/userdata/system/al3_bridge.py
+/userdata/system/al3_bridge.log
+/userdata/system/services/AL3_Bridge
+/userdata/system/services/Force_Headphones
+/userdata/system/configs/emulationstation/es_input.cfg
+/userdata/system/batocera.conf
+```
 
-The custom configuration is kept under `/userdata` so it survives normal Batocera reboots and updates.
+Project-specific customizations are kept under:
 
-## Troubleshooting philosophy
+```text
+/userdata
+```
 
-Troubleshoot from the lowest layer upward:
+so they persist across normal Batocera reboots and updates.
 
-    Physical control
-          ↓
-    Original cabinet wiring
-          ↓
-    Controller/interface board
-          ↓
-    USB / FTDI serial interface
-          ↓
-    /dev/ttyUSB0
-          ↓
-    AL3 bridge
-          ↓
-    Linux input
-          ↓
-    EmulationStation / Batocera
-          ↓
-    MAME
-          ↓
-    Individual game
+---
+
+## Troubleshooting Philosophy
+
+The most useful lesson from this project was to troubleshoot from the lowest layer upward.
+
+```text
+Physical control
+      ↓
+Original cabinet wiring
+      ↓
+Controller/interface board
+      ↓
+USB / FTDI serial interface
+      ↓
+/dev/ttyUSB0
+      ↓
+AL3 bridge
+      ↓
+Linux input
+      ↓
+EmulationStation / Batocera
+      ↓
+MAME
+      ↓
+Individual game
+```
+
+For example:
+
+```text
+/dev/ttyUSB0 missing
+→ USB / controller interface problem
+
+evtest shows no input
+→ bridge or controller problem
+
+evtest works but EmulationStation does not
+→ controller mapping problem
+
+EmulationStation works but one game does not
+→ emulator or game configuration problem
+
+Only one game is oversized
+→ per-game viewport problem
+```
 
 Useful commands include:
 
-    ls -l /dev/ttyUSB*
-    dmesg | grep -i -E 'ftdi|ttyUSB'
-    ps aux | grep '[a]l3_bridge.py'
-    batocera-services list | grep -i AL3
-    evtest
-    export DISPLAY=:0.0
-    sdl2-jstest --list
-    tail -f /userdata/system/al3_bridge.log
+```bash
+ls -l /dev/ttyUSB*
+dmesg | grep -i -E 'ftdi|ttyUSB'
+ps aux | grep '[a]l3_bridge.py'
+batocera-services list | grep -i AL3
+evtest
+export DISPLAY=:0.0
+sdl2-jstest --list
+tail -f /userdata/system/al3_bridge.log
+```
 
-For the full diagnostic process, see:
+For the complete troubleshooting process, see:
 
 **[Troubleshooting](docs/troubleshooting.md)**
+
+---
+
+## Design Philosophy
+
+This conversion deliberately avoids unnecessary hardware replacement.
+
+The project does **not** rely on:
+
+- completely rewiring the control panel
+- replacing the original controls with generic USB arcade kits
+- replacing the original CRT with an LCD
+- adding separate Coin buttons
+- adding separate volume buttons
+- applying game-specific fixes globally
+
+Instead, the original cabinet hardware is preserved wherever practical and compatibility issues are solved in software.
+
+The general principle is:
+
+> **Solve each problem at the narrowest layer where the problem actually exists.**
+
+---
+
+## Repository Structure
+
+```text
+arcade-legends-3-batocera/
+├── README.md
+├── INSTALL.md
+├── LICENSE
+│
+├── config/
+│   └── game-overrides.conf
+│
+├── docs/
+│   ├── hardware.md
+│   ├── batocera-configuration.md
+│   ├── controls.md
+│   ├── game-fixes.md
+│   └── troubleshooting.md
+│
+├── images/
+│
+├── scripts/
+│   ├── al3_bridge.py
+│   └── update_es_input.py
+│
+└── services/
+    ├── AL3_Bridge
+    └── Force_Headphones
+```
+
+---
 
 ## Documentation
 
@@ -247,41 +508,28 @@ For the full diagnostic process, see:
 - **[Game-Specific Fixes](docs/game-fixes.md)**
 - **[Troubleshooting](docs/troubleshooting.md)**
 
-## Repository structure
+The hardware guide includes photos of the actual cabinet, original electronics, CRT, control panel, Batocera laptop, and physical connections.
 
-    arcade-legends-3-batocera/
-    ├── README.md
-    ├── INSTALL.md
-    ├── LICENSE
-    ├── config/
-    │   └── game-overrides.conf
-    ├── docs/
-    │   ├── hardware.md
-    │   ├── batocera-configuration.md
-    │   ├── controls.md
-    │   ├── game-fixes.md
-    │   └── troubleshooting.md
-    ├── images/
-    ├── scripts/
-    │   ├── al3_bridge.py
-    │   └── update_es_input.py
-    └── services/
-        ├── AL3_Bridge
-        └── Force_Headphones
+---
 
-## Status
+## Current Status
 
-The cabinet is currently operational with:
+The cabinet is operational with:
 
-- original two-player controls
+- original two-player arcade controls
 - original trackball
 - Start/Coin long-press behavior
+- EXIT-based cabinet volume controls
 - original CRT
-- original cabinet audio
+- original cabinet speakers and audio path
 - automatic controller bridge startup
 - persistent Batocera configuration
-- game-specific control overrides
+- game-specific input overrides
 - game-specific CRT viewport overrides
+
+The project is intended both as a record of this particular conversion and as a reference for others who want to modernize an Arcade Legends cabinet without unnecessarily replacing the original hardware.
+
+---
 
 ## License
 
