@@ -1,0 +1,67 @@
+#!/bin/bash
+
+BRIDGE="/userdata/system/al3_bridge.py"
+LOG="/userdata/system/al3_bridge.log"
+PIDFILE="/var/run/al3_bridge_service.pid"
+
+case "$1" in
+
+start)
+    # Don't start a second supervisor
+    if [ -f "$PIDFILE" ]; then
+        PID="$(cat "$PIDFILE" 2>/dev/null)"
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            echo "AL3 Bridge already running"
+            exit 0
+        fi
+    fi
+
+    echo "$(date): AL3 Bridge service starting" >> "$LOG"
+
+    (
+        while true; do
+
+            # Wait for the original AL3 FTDI board
+            while [ ! -c /dev/ttyUSB0 ]; do
+                sleep 1
+            done
+
+            echo "$(date): /dev/ttyUSB0 found - starting bridge" >> "$LOG"
+
+            python3 "$BRIDGE" >> "$LOG" 2>&1
+
+            RC=$?
+            echo "$(date): Bridge exited code $RC - retrying in 2 seconds" >> "$LOG"
+
+            sleep 2
+        done
+    ) &
+
+    echo $! > "$PIDFILE"
+    ;;
+
+stop)
+    echo "$(date): AL3 Bridge service stopping" >> "$LOG"
+
+    if [ -f "$PIDFILE" ]; then
+        PID="$(cat "$PIDFILE" 2>/dev/null)"
+        [ -n "$PID" ] && kill "$PID" 2>/dev/null
+        rm -f "$PIDFILE"
+    fi
+
+    pkill -f '^python3 /userdata/system/al3_bridge.py$' 2>/dev/null || true
+    ;;
+
+status)
+    if [ -f "$PIDFILE" ]; then
+        PID="$(cat "$PIDFILE" 2>/dev/null)"
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            echo "AL3 Bridge service is running (PID $PID)"
+            exit 0
+        fi
+    fi
+
+    echo "AL3 Bridge service is stopped"
+    ;;
+
+esac
