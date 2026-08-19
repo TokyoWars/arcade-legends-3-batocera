@@ -2,7 +2,7 @@
 
 This document explains how the original Arcade Legends 3 controls are translated into standard Linux input devices that Batocera and MAME can use.
 
-The goal of the project was to keep the original cabinet controls, trackball, wiring, and controller/interface electronics rather than replace everything with generic USB arcade encoders.
+The goal of the project was to preserve the original cabinet controls, trackball, wiring, and controller/interface electronics rather than replace them with generic USB arcade encoders.
 
 The custom AL3 bridge acts as the compatibility layer between the original cabinet hardware and Linux.
 
@@ -68,7 +68,7 @@ or:
 
     115200 8N1
 
-The controller sends a continuous stream of binary data.
+The controller sends a continuous stream of binary packets.
 
 The packet format observed during this project is:
 
@@ -79,26 +79,26 @@ with framing bytes:
     Start: 0x5A
     End:   0xA5
 
-The Python bridge reads this stream, identifies valid packets, decodes the relevant controls, and converts them into standard Linux input events.
+The Python bridge reads this stream, identifies valid packets, decodes the controls, and converts them into standard Linux input events.
 
 ---
 
 ## Why Virtual Linux Devices?
 
-Rather than modifying Batocera, SDL, or MAME to understand the original Arcade Legends protocol directly, the bridge uses:
+Rather than modifying Batocera, SDL, or MAME to understand the Arcade Legends protocol directly, the bridge uses:
 
     evdev
     UInput
 
-to create standard Linux input devices.
+to create normal Linux input devices.
 
-From the software side:
+The software flow becomes:
 
     Original proprietary controller protocol
                 ↓
     al3_bridge.py
                 ↓
-    Normal Linux input devices
+    Standard Linux input devices
                 ↓
     SDL
                 ↓
@@ -106,7 +106,7 @@ From the software side:
                 ↓
     MAME
 
-Batocera and MAME therefore do not need to understand the original controller protocol.
+From Batocera's perspective, the original cabinet controls now behave like normal game controllers and relative pointing devices.
 
 ---
 
@@ -143,15 +143,15 @@ This makes the original trackball appear to Linux as a mouse-style relative inpu
 
 ### AL3 Hotkeys
 
-Provides cabinet-level hotkey input separate from normal gameplay controls.
+Provides cabinet-level functions separate from normal gameplay controls.
 
-The verified bridge exposes:
+The working bridge exposes:
 
     KEY_EXIT
+    KEY_VOLUMEUP
+    KEY_VOLUMEDOWN
 
-through this device.
-
-Keeping cabinet-level functions separate reduces the chance of accidentally assigning a normal gameplay button to a system function.
+The volume keys are used by the EXIT + Player 1 Up/Down shortcut described below.
 
 ---
 
@@ -163,17 +163,15 @@ The bridge converts their state into standard Linux directional input.
 
 For example:
 
-    Original controller:
     Player 1 LEFT active
-
             ↓
-
     al3_bridge.py
-
             ↓
-
-    Linux input:
-    Player 1 LEFT
+    AL3 Player 1
+            ↓
+    Linux directional event
+            ↓
+    Batocera / MAME
 
 The same applies to:
 
@@ -183,8 +181,6 @@ The same applies to:
     RIGHT
 
 for both players.
-
-From Batocera's perspective, these are normal digital controller directions.
 
 ---
 
@@ -206,25 +202,25 @@ The general path is:
             ↓
     Batocera / MAME
 
-The bridge handles the hardware-specific translation once.
+The hardware-specific translation is handled once in the bridge.
 
-After that, controller assignment is handled normally by Batocera and MAME.
+After that, Batocera and MAME can work with the controls normally.
 
 ---
 
 ## Start and Coin Without Adding Buttons
 
-One of the goals of the conversion was to preserve the original control panel without drilling holes for additional Coin buttons.
+One of the goals of the conversion was to keep the original control panel intact.
 
-The existing player button therefore has two software-defined behaviors.
+No additional Coin buttons were added.
 
-Short press:
+Instead, the original player button has two behaviors:
 
-    START
+    Short press
+    → START
 
-Long press of approximately one second:
-
-    SELECT / COIN
+    Hold for approximately one second
+    → SELECT / COIN
 
 Conceptually:
 
@@ -234,11 +230,11 @@ Conceptually:
             │       ↓
             │     START
             │
-            └── held about 1 second
+            └── held approximately 1 second
                     ↓
-                 COIN / SELECT
+                 SELECT / COIN
 
-This allows the original physical controls to provide both emulator functions without modifying the panel.
+This gives Batocera and MAME the functions they need without modifying the cabinet.
 
 ---
 
@@ -248,8 +244,8 @@ The virtual Player 1 and Player 2 controllers expose eight buttons.
 
 The verified mappings are:
 
-    SELECT = SDL button 6
-    START  = SDL button 7
+    Button 6 → SELECT
+    Button 7 → START
 
 These mappings are stored in:
 
@@ -269,7 +265,7 @@ and sets:
     Button 6 → SELECT
     Button 7 → START
 
-The important part is maintaining consistency through the whole input chain:
+This keeps the input chain consistent:
 
     AL3 bridge
         ↓
@@ -285,7 +281,7 @@ The important part is maintaining consistency through the whole input chain:
 
 The trackball behaves differently from a joystick.
 
-A joystick represents direction or position.
+A joystick represents a direction or position.
 
 A trackball represents movement.
 
@@ -295,28 +291,28 @@ For example:
     LEFT is pressed
 
     Trackball:
-    move 12 units left
+    move a number of units left
 
-The AL3 bridge therefore exposes the trackball using Linux relative movement events:
+The AL3 bridge therefore exposes the original trackball using Linux relative movement events:
 
     REL_X
     REL_Y
 
-This causes Linux to treat the original arcade trackball like a mouse.
+This causes Linux to treat it like a mouse-style device.
 
-That is the type of input many MAME games expect.
+That is the type of input many MAME games expect for trackball and some dial/spinner controls.
 
 ---
 
 ## Trackball Data Flow
 
-The full trackball path is:
+The trackball path is:
 
     Physical trackball movement
             ↓
     Original Arcade Legends controller/interface
             ↓
-    Movement encoded in serial packet
+    Movement encoded in controller packet
             ↓
     al3_bridge.py
             ↓
@@ -326,7 +322,20 @@ The full trackball path is:
             ↓
     MAME relative input
 
-This allows the original cabinet trackball to remain in use without rewiring it to a separate USB trackball controller.
+This allows the original trackball to remain connected through the original cabinet electronics.
+
+---
+
+## Trackball Sensitivity
+
+The working bridge applies a 2× multiplier to the raw trackball data:
+
+    dx = signed7(pkt[5]) * 2
+    dy = signed7(pkt[6]) * 2
+
+This was the working sensitivity used on the completed cabinet. :contentReference[oaicite:1]{index=1}
+
+The multiplier can be adjusted in `al3_bridge.py` if a different cabinet requires a faster or slower response.
 
 ---
 
@@ -334,7 +343,7 @@ This allows the original cabinet trackball to remain in use without rewiring it 
 
 Some arcade games use rotary or dial-style controls rather than a trackball.
 
-MAME may represent those controls as:
+MAME may expose those controls as:
 
     DIAL
     PADDLE
@@ -342,46 +351,46 @@ MAME may represent those controls as:
 
 depending on the game.
 
-Because the AL3 bridge already produces relative movement, that input can also be used by games that expect spinner-style movement.
+Because the AL3 bridge already produces relative movement, the original trackball can provide the relative input path needed by some of those games.
 
-Some games still require a game-specific emulator setting.
+Certain games still require game-specific emulator settings.
 
-For example, Tempest required MAME mouse input to be enabled.
+Tempest is one example.
 
-That configuration is documented in:
+Its working configuration is documented in:
 
 [game-fixes.md](game-fixes.md)
 
-The important design rule is to keep such fixes game-specific when the rest of the cabinet already works correctly.
+The project deliberately keeps these fixes game-specific when the rest of the cabinet already works correctly.
 
 ---
 
 ## Cabinet Exit Control
 
-The bridge creates a separate:
+The original cabinet EXIT control is handled directly by the AL3 bridge.
 
-    AL3 Hotkeys
-
-device for cabinet-level system functions.
-
-The verified bridge maps the cabinet EXIT control to:
-
-    KEY_EXIT
-
-This keeps the exit function separate from Player 1 and Player 2 gameplay buttons.
-
-The intended behavior is:
+EXIT by itself behaves normally:
 
     EXIT
-    → leave the current game and return to EmulationStation
+    → Exit the current game and return to EmulationStation
+
+The working bridge does not simply emit a raw exit key and hope the emulator interprets it correctly.
+
+Instead, when EXIT is released, the bridge invokes:
+
+    hotkeygen --send exit
+
+This uses Batocera's normal hotkey mechanism to exit the current emulator. :contentReference[oaicite:2]{index=2}
 
 ---
 
 ## Cabinet Volume Control
 
-A cabinet-level volume-control shortcut was also used during the build so volume could be changed without adding dedicated physical volume buttons.
+The cabinet also provides volume adjustment without adding dedicated physical volume buttons.
 
-The intended cabinet behavior was:
+The original EXIT button doubles as a modifier for Player 1 Up and Down.
+
+The behavior is:
 
     EXIT + Player 1 UP
     → Volume Up
@@ -389,25 +398,65 @@ The intended cabinet behavior was:
     EXIT + Player 1 DOWN
     → Volume Down
 
-while:
+The bridge emits standard Linux multimedia keys:
+
+    KEY_VOLUMEUP
+    KEY_VOLUMEDOWN
+
+The first volume adjustment happens immediately.
+
+If the direction remains held, the bridge waits approximately:
+
+    0.35 seconds
+
+and then repeats approximately every:
+
+    0.12 seconds
+
+This makes both small and large volume changes practical. :contentReference[oaicite:3]{index=3}
+
+While EXIT is held, Player 1 vertical joystick movement is suppressed so the game does not also receive Up or Down input.
+
+If EXIT was used as the volume modifier, releasing EXIT does not exit the game.
+
+The final behavior is therefore:
 
     EXIT alone
-    → Exit the current game
+    → Exit game
 
-This preserves the original control panel and reuses existing controls as a modifier combination.
+    EXIT + P1 UP
+    → Increase volume
 
-However, the current repository version of `al3_bridge.py` only exposes the EXIT control through `AL3 Hotkeys` as `KEY_EXIT`.
+    EXIT + P1 DOWN
+    → Decrease volume
 
-The exact software implementation that turns:
+This provides cabinet-level volume control without adding any new switches or modifying the original control panel.
 
-    EXIT + Player 1 UP
-    EXIT + Player 1 DOWN
+---
 
-into system volume commands is not currently included in the repository.
+## Why the Volume Shortcut Works Cleanly
 
-For that reason, this behavior is documented here as part of the working cabinet design, but it should not be assumed to be provided by `al3_bridge.py` alone.
+The bridge keeps track of whether EXIT has been used for volume.
 
-The missing volume-control implementation should be added to the repository once the exact working configuration is recovered.
+Conceptually:
+
+    EXIT pressed
+        │
+        ├── no P1 Up/Down used
+        │       ↓
+        │   release EXIT
+        │       ↓
+        │   hotkeygen --send exit
+        │
+        └── P1 Up or Down used
+                ↓
+            volume adjustment
+                ↓
+            release EXIT
+                ↓
+            do not exit
+
+This prevents accidental emulator exits while changing the cabinet volume.
 
 ---
 
@@ -437,11 +486,12 @@ The trackball should generate:
     REL_X
     REL_Y
 
-The cabinet exit control should generate the event associated with:
+The volume shortcut should generate:
 
-    KEY_EXIT
+    KEY_VOLUMEUP
+    KEY_VOLUMEDOWN
 
-If the expected event is visible in `evtest`, the original hardware and bridge are probably working correctly.
+If the expected events are visible in `evtest`, the original hardware and bridge are probably working correctly.
 
 ---
 
@@ -483,7 +533,7 @@ The troubleshooting path should generally be:
 
 If `evtest` works but SDL does not, the serial bridge is probably not the problem.
 
-If SDL works but one MAME game does not, the issue is probably higher in the emulator/game configuration layer.
+If SDL works but one MAME game does not, the issue is probably at the emulator or game configuration layer.
 
 ---
 
@@ -518,7 +568,7 @@ Useful command:
 Check:
 
     al3_bridge.py
-    service status
+    AL3_Bridge service
     serial configuration
     Python dependencies
     permissions
@@ -530,6 +580,32 @@ Useful commands:
     batocera-services list | grep -i AL3
 
     tail -f /userdata/system/al3_bridge.log
+
+### Controls work but volume shortcut does not
+
+Check that the running bridge contains:
+
+    KEY_VOLUMEUP
+    KEY_VOLUMEDOWN
+
+and verify:
+
+    EXIT + P1 UP
+    EXIT + P1 DOWN
+
+with `evtest`.
+
+### EXIT also exits while changing volume
+
+Verify that the running bridge contains the:
+
+    exit_used_for_volume
+
+logic and that EXIT is only sent through:
+
+    hotkeygen --send exit
+
+when the volume modifier was not used.
 
 ### `evtest` works but Batocera does not
 
@@ -546,7 +622,7 @@ Check:
     MAME input configuration
     game-specific override
 
-Do not change the bridge unless the problem actually exists at the bridge layer.
+Do not change the controller bridge unless the problem actually exists at the bridge layer.
 
 ---
 
