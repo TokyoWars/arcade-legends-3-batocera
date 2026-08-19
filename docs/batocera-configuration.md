@@ -1,82 +1,83 @@
 # Batocera Configuration
 
-This section documents the Batocera configuration used to integrate the original arcade cabinet controls, preserve custom behavior across reboots, and support game-specific overrides without making unnecessary global changes.
+This document describes the Batocera-side configuration used to integrate the original Arcade Legends 3 hardware, preserve the custom controller behavior across reboots, and keep game-specific fixes isolated from the global configuration.
 
-The general philosophy was:
+The general philosophy of the project is:
 
-> Keep global Batocera configuration simple, put custom logic under `/userdata`, and use per-game overrides only when a specific game genuinely requires them.
+> Keep global Batocera configuration simple, place custom logic under `/userdata`, and use per-game overrides only when a specific game genuinely requires them.
 
-This made the system easier to maintain and troubleshoot.
+This makes the cabinet easier to maintain, troubleshoot, and rebuild.
 
 ---
 
-# Why `/userdata` Matters
+## Why `/userdata` Matters
 
 Batocera is designed as an appliance-style operating system.
 
-The core operating system is not intended to be modified like a normal Linux installation.
-
-Persistent user configuration should therefore be stored under:
+The project therefore keeps custom scripts, services, controller mappings, and configuration under persistent storage whenever possible:
 
 ```text
 /userdata/
 ```
 
-This became the foundation of the project.
-
-Custom files, scripts, controller mappings, emulator configuration, and startup logic were kept in persistent locations whenever possible.
-
----
-
-# Important Persistent Paths
-
-Some of the important paths used during this project include:
+The most important project files are stored under:
 
 ```text
 /userdata/system/
 ```
 
-for system-level customizations and scripts.
-
-The custom arcade controller bridge was stored under:
+This includes:
 
 ```text
 /userdata/system/al3_bridge.py
-```
-
-Batocera's EmulationStation controller configuration is stored under:
-
-```text
+/userdata/system/al3_bridge.log
+/userdata/system/services/AL3_Bridge
+/userdata/system/services/Force_Headphones
 /userdata/system/configs/emulationstation/es_input.cfg
+/userdata/system/batocera.conf
 ```
 
-Other emulator-specific or system-specific configuration is also kept under the `/userdata/system/configs/` tree.
+Keeping the customizations under `/userdata` allows them to survive normal reboots and Batocera updates.
 
 ---
 
-# Startup Architecture
+## Controller Startup Architecture
 
-The custom arcade controls need to be available before games are launched.
+The original Arcade Legends controller/interface connects to the Batocera computer by USB.
 
-The startup process therefore follows this general pattern:
+Linux detects its FTDI serial interface as:
 
 ```text
-Batocera boots
-      ↓
-/dev/ttyUSB0 appears
-      ↓
-AL3 input bridge starts
-      ↓
-Virtual input devices are created
-      ↓
-EmulationStation starts
-      ↓
-Batocera sees normal controllers
+FT232R USB UART
 ```
 
-The important part is that the AL3 bridge runs automatically rather than requiring manual intervention after every boot.
+and exposes it as:
 
-The bridge creates the virtual Linux input devices used throughout the system:
+```text
+/dev/ttyUSB0
+```
+
+The controller path is:
+
+```text
+Original Arcade Legends controls
+            ↓
+Original controller/interface
+            ↓
+USB
+            ↓
+FTDI serial interface
+            ↓
+/dev/ttyUSB0
+            ↓
+al3_bridge.py
+            ↓
+Linux UInput devices
+            ↓
+Batocera / SDL / MAME
+```
+
+The bridge creates:
 
 ```text
 AL3 Player 1
@@ -85,322 +86,727 @@ AL3 Trackball
 AL3 Hotkeys
 ```
 
+These devices allow Batocera to work with the original cabinet hardware without requiring the original controls to appear as standard USB gamepads.
+
 ---
 
-# Controller Configuration
+## AL3 Bridge Service
 
-Once the AL3 bridge creates Linux input devices, Batocera treats them like normal controllers.
+The controller bridge is:
 
-The two player devices are mapped through EmulationStation.
+```text
+/userdata/system/al3_bridge.py
+```
 
-The player controls include:
+It is started automatically by the Batocera service:
 
-* joystick directions
-* arcade action buttons
-* Start
-* Select / Coin
+```text
+/userdata/system/services/AL3_Bridge
+```
 
-The controller mapping is stored in:
+The service waits until:
+
+```text
+/dev/ttyUSB0
+```
+
+exists before starting the Python bridge.
+
+If the bridge exits, the service waits briefly and starts it again.
+
+This prevents a USB startup timing issue from leaving the cabinet without controls after boot.
+
+Useful checks are:
+
+```bash
+batocera-services list | grep -i AL3
+```
+
+and:
+
+```bash
+ps aux | grep '[a]l3_bridge.py'
+```
+
+The bridge log is:
+
+```text
+/userdata/system/al3_bridge.log
+```
+
+and can be monitored with:
+
+```bash
+tail -f /userdata/system/al3_bridge.log
+```
+
+---
+
+## Controller Configuration
+
+Once the bridge creates the virtual Linux input devices, Player 1 and Player 2 are mapped through EmulationStation.
+
+The relevant mapping file is:
 
 ```text
 /userdata/system/configs/emulationstation/es_input.cfg
 ```
 
-During the build, the Player 1 and Player 2 virtual controllers were configured so that the Start and Select functions matched the custom behavior produced by the AL3 bridge.
+The virtual player devices expose:
 
-The resulting controller exposes the required buttons to SDL and Batocera without requiring a keyboard during normal operation.
+- joystick directions
+- six arcade buttons
+- Select / Coin
+- Start
+
+The verified SDL mappings are:
+
+```text
+Button 6 → SELECT
+Button 7 → START
+```
+
+The repository contains:
+
+```text
+scripts/update_es_input.py
+```
+
+which updates only:
+
+```text
+AL3 Player 1
+AL3 Player 2
+```
+
+in `es_input.cfg`.
+
+This avoids modifying unrelated controllers.
 
 ---
 
-# Start and Coin Behavior
+## Start and Coin Behavior
 
-The physical player buttons were intentionally kept unchanged.
+The original player buttons were kept physically unchanged.
 
-Instead of adding additional cabinet buttons, the AL3 bridge interprets the same physical button differently depending on how long it is pressed.
-
-A short press generates:
+The bridge interprets each player button according to how long it is held.
 
 ```text
-START
+Short press
+→ START
+
+Hold approximately one second
+→ SELECT / COIN
 ```
 
-A long press generates:
+The long-press behavior is implemented in `al3_bridge.py`.
 
-```text
-SELECT / COIN
-```
+From Batocera's point of view, these appear as normal controller buttons.
 
-From Batocera's point of view, these appear as ordinary controller buttons.
-
-This means the cabinet can support modern emulator expectations while preserving the original control panel layout.
+This avoids drilling additional Coin buttons into the original control panel.
 
 ---
 
-# Exit / Hotkey Handling
+## Cabinet Exit Handling
 
-An arcade cabinet needs a reliable way to leave a game and return to EmulationStation.
+The original cabinet EXIT control is also retained.
 
-That functionality is handled through the dedicated virtual hotkey device:
+The current working bridge handles EXIT on button release.
+
+If EXIT was not used as the volume modifier, the bridge executes:
+
+```text
+hotkeygen --send exit
+```
+
+The normal behavior is therefore:
+
+```text
+EXIT
+→ Exit current game
+→ Return to EmulationStation
+```
+
+Using `hotkeygen` lets Batocera perform the emulator exit rather than relying on a game-specific key assignment.
+
+---
+
+## Cabinet Volume Control
+
+No dedicated volume buttons were added to the cabinet.
+
+Instead, the EXIT button also acts as a modifier for Player 1 Up and Down.
+
+The working controls are:
+
+```text
+EXIT + Player 1 UP
+→ Volume Up
+
+EXIT + Player 1 DOWN
+→ Volume Down
+```
+
+The bridge emits standard Linux multimedia keys:
+
+```text
+KEY_VOLUMEUP
+KEY_VOLUMEDOWN
+```
+
+through the:
 
 ```text
 AL3 Hotkeys
 ```
 
-This separates cabinet-level functions from normal player controls.
+virtual input device.
 
-The benefit of this approach is that game controls remain game controls, while front-end actions such as exiting a game can be handled independently.
+The first volume change occurs immediately.
+
+If the joystick remains held, repeat begins after approximately:
+
+```text
+0.35 seconds
+```
+
+and then repeats approximately every:
+
+```text
+0.12 seconds
+```
+
+This allows both quick volume taps and larger volume adjustments.
 
 ---
 
-# MAME Configuration Strategy
+## Preventing Accidental Exit and Movement
 
-Most arcade games should use the same basic MAME configuration.
+The bridge distinguishes between EXIT being used normally and EXIT being used as the volume modifier.
 
-The preferred configuration model is:
+Conceptually:
 
 ```text
-Global MAME configuration
+EXIT pressed
+    │
+    ├── no P1 Up/Down
+    │       ↓
+    │   EXIT released
+    │       ↓
+    │   hotkeygen --send exit
+    │
+    └── P1 Up/Down used
+            ↓
+        adjust volume
+            ↓
+        EXIT released
+            ↓
+        do not exit
+```
+
+While EXIT is held, Player 1 vertical joystick movement is suppressed.
+
+Therefore:
+
+```text
+EXIT + P1 UP
+```
+
+changes volume but does not also move Player 1 upward in the game.
+
+The same applies to:
+
+```text
+EXIT + P1 DOWN
+```
+
+This makes the shortcut usable during gameplay without generating unwanted movement or accidentally exiting the emulator.
+
+---
+
+## AL3 Hotkeys Device
+
+The bridge creates a dedicated virtual device named:
+
+```text
+AL3 Hotkeys
+```
+
+Its advertised key capabilities include:
+
+```text
+KEY_EXIT
+KEY_VOLUMEUP
+KEY_VOLUMEDOWN
+```
+
+In the current working bridge:
+
+```text
+KEY_VOLUMEUP
+KEY_VOLUMEDOWN
+```
+
+are emitted through this virtual device for cabinet volume control.
+
+The actual emulator exit action is handled separately through:
+
+```text
+hotkeygen --send exit
+```
+
+This distinction is important when troubleshooting.
+
+---
+
+## Trackball Configuration
+
+The original Arcade Legends trackball remains connected through the original cabinet controller/interface.
+
+The bridge converts its movement into Linux relative mouse input:
+
+```text
+REL_X
+REL_Y
+```
+
+The path is:
+
+```text
+Physical trackball
+        ↓
+Original controller/interface
+        ↓
+Serial packet
+        ↓
+al3_bridge.py
+        ↓
+REL_X / REL_Y
+        ↓
+AL3 Trackball
+        ↓
+MAME
+```
+
+This allows Batocera and MAME to use the original trackball without replacing its controller electronics.
+
+---
+
+## Trackball Sensitivity
+
+The working bridge applies a 2× sensitivity multiplier to the raw trackball movement:
+
+```python
+dx = signed7(pkt[5]) * 2
+dy = signed7(pkt[6]) * 2
+```
+
+This is the sensitivity currently used on the completed cabinet.
+
+The multiplier is part of the bridge rather than a global MAME setting.
+
+If another cabinet requires a different overall trackball speed, this value can be adjusted.
+
+If only one game has incorrect analog sensitivity, the game's own configuration should be investigated first.
+
+---
+
+## Audio Configuration
+
+The Batocera computer sends analog audio into the original cabinet audio path.
+
+On this computer, Batocera did not always select the intended analog output after boot.
+
+The repository therefore includes:
+
+```text
+services/Force_Headphones
+```
+
+which is installed as:
+
+```text
+/userdata/system/services/Force_Headphones
+```
+
+The working service selects:
+
+```text
+analog-output-headphones
+```
+
+on the sink:
+
+```text
+alsa_output.pci-0000_00_1f.3.analog-stereo
+```
+
+The sink name is specific to the computer used in this cabinet.
+
+Another Batocera computer may use a different sink name.
+
+Available sinks can be checked with:
+
+```bash
+pactl list short sinks
+```
+
+The active port can be checked with:
+
+```bash
+pactl list sinks | grep "Active Port"
+```
+
+---
+
+## MAME Configuration Strategy
+
+Most games should use the same basic global configuration.
+
+The preferred model is:
+
+```text
+Global configuration
         +
 Per-game exceptions
 ```
 
-rather than creating one heavily customized global configuration that tries to accommodate every game.
+rather than modifying the global emulator setup whenever one game behaves differently.
 
-This is particularly important because MAME emulates games with very different original hardware.
+Arcade games can use very different original controls and display formats, including:
 
-Games may use:
+- digital joysticks
+- trackballs
+- spinners
+- analog controls
+- horizontal displays
+- vertical displays
+- vector displays
 
-* digital joysticks
-* trackballs
-* spinners
-* analog controls
-* horizontal monitors
-* vertical monitors
-* vector displays
-
-A single global configuration cannot always represent all of those correctly.
+A setting that solves one title can easily create problems for another.
 
 ---
 
-# Per-Game Overrides
+## Per-Game Overrides
 
-When a game requires different behavior, the change should be limited to that game.
+When a game requires different behavior, the fix is limited to that game whenever practical.
 
-Examples from this build include:
-
-* Tempest
-* Pac-Man
-* Frogger
-
-These games were not used as the basis for the global configuration.
-
-Instead, they serve as examples of when exceptions are appropriate.
-
-For example:
+Examples from this cabinet include:
 
 ```text
-Most games
-    ↓
-Global settings
-
 Tempest
-    ↓
-Input-specific override
+→ relative-input / mouse configuration
 
 Pac-Man
-    ↓
-Display-specific override
+→ CRT viewport adjustment
 
 Frogger
-    ↓
-Display-specific override
+→ CRT viewport adjustment
 ```
 
-This prevents a fix for one game from creating problems in dozens of others.
+The repository includes the verified examples in:
+
+```text
+config/game-overrides.conf
+```
+
+The active cabinet settings are stored in:
+
+```text
+/userdata/system/batocera.conf
+```
+
+The general rule is:
+
+> If the problem exists in one game, fix one game. If the problem exists everywhere, fix the global configuration.
 
 ---
 
-# Tempest as an Example
+## Tempest Example
 
-Tempest is a useful example because it does not behave like a typical joystick-driven raster game.
+Tempest required relative input for its dial/spinner-style control.
 
-It was originally designed around:
+The working per-game configuration is:
 
-* a vector display
-* a rotary spinner-style input
+```text
+mame["tempest.zip"].core=mame
+mame["tempest.zip"].emulator=libretro
+mame["tempest.zip"].retroarchcore.mame_mouse_enable=enabled
+```
 
-The cabinet's normal joystick configuration was therefore not sufficient on its own.
+The important point is not that every spinner game should use this exact configuration.
 
-The solution was handled as a game-specific MAME exception rather than by changing the controls globally.
-
-This preserved normal joystick behavior for the rest of the arcade library.
-
----
-
-# Pac-Man and Frogger as Examples
-
-Pac-Man and Frogger presented a different issue.
-
-Both are vertical-format games.
-
-The games launched and played correctly, but their displayed image required adjustment for the physical cabinet screen.
-
-Rather than changing the cabinet's global screen configuration, each game received its own display-related override.
-
-This demonstrates an important rule used throughout the project:
-
-> If the problem exists in one game, fix one game.
-
-> If the problem exists across the entire system, fix the global configuration.
+The important point is that Tempest's input issue was solved at the game level rather than by changing the entire arcade controller configuration.
 
 ---
 
-# Logs Used During Troubleshooting
+## Pac-Man and Frogger Examples
 
-Batocera provides several useful logs when diagnosing launch and emulator problems.
+Pac-Man and Frogger launched and played correctly but were too large for the usable visible area of this cabinet's CRT.
 
-One of the most useful during this project was:
+The solution was to use a per-game custom viewport.
+
+The working cabinet-specific dimensions are:
+
+```text
+335 × 447
+```
+
+These dimensions should not be treated as universal settings.
+
+They are specific to the physical CRT and visible area of this cabinet.
+
+The useful technique is the per-game viewport override, not the particular numbers.
+
+---
+
+## Launch Logs
+
+One of the most useful Batocera troubleshooting files is:
 
 ```text
 /userdata/system/logs/es_launch_stdout.log
 ```
 
-This helped identify the actual emulator command being launched and confirm whether MAME-specific arguments were being used.
+This shows what Batocera actually launched.
 
-For example, launch behavior could be checked with commands such as:
+For MAME:
+
+```bash
+grep -Ei '/usr/bin/mame|mame' \
+/userdata/system/logs/es_launch_stdout.log
+```
+
+For Tempest:
 
 ```bash
 grep -Ei 'tempest|/usr/bin/mame|mouse|dial|trackball' \
 /userdata/system/logs/es_launch_stdout.log
 ```
 
-This was particularly useful while troubleshooting Tempest.
+For Pac-Man and Frogger:
+
+```bash
+grep -Ei 'pacman|frogger' \
+/userdata/system/logs/es_launch_stdout.log
+```
+
+The launch log is more useful than guessing which emulator, core, or arguments Batocera selected.
 
 ---
 
-# Testing Linux Input Devices
+## Testing Linux Input
 
-Before changing Batocera or MAME settings, the input devices were tested directly at the Linux level.
+Before changing Batocera or MAME settings, test the input at the Linux layer.
 
-Useful tools included:
+Run:
 
 ```bash
 evtest
 ```
 
-and SDL controller testing utilities.
-
-The troubleshooting sequence was generally:
+The bridge should expose:
 
 ```text
-Does Linux see the physical input?
-        ↓
-Does the AL3 bridge generate the correct event?
-        ↓
-Does SDL see the controller?
-        ↓
-Does Batocera see the controller?
-        ↓
-Does MAME see the controller?
-        ↓
-Does the specific game map it correctly?
+AL3 Player 1
+AL3 Player 2
+AL3 Trackball
+AL3 Hotkeys
 ```
 
-This avoids changing emulator configuration when the real problem is lower in the stack.
+Use `evtest` to verify:
 
----
+- joystick movement
+- arcade buttons
+- Start
+- Coin / Select
+- trackball movement
+- volume keys
 
-# Avoiding Unnecessary Global Changes
-
-During the project, several issues initially looked like global Batocera problems but turned out to be narrower.
-
-The general rule became:
-
-1. Verify the hardware.
-2. Verify Linux input.
-3. Verify SDL.
-4. Verify Batocera.
-5. Verify MAME.
-6. Only then create a game-specific override if necessary.
-
-This significantly reduced the risk of fixing one problem while creating another.
-
----
-
-# Configuration Persistence
-
-Any custom behavior required for the cabinet should survive:
-
-* reboot
-* shutdown
-* normal Batocera use
-* emulator restarts
-
-For that reason, custom files were stored under `/userdata`.
-
-The project avoids relying on temporary changes made directly to Batocera's read-only system partition.
-
-When a configuration change was made, it was tested again after reboot to confirm that it remained active.
-
----
-
-# Recommended Backup
-
-Because the cabinet now depends on several custom files, it is a good idea to back up the persistent configuration tree.
-
-The most important areas are:
+The trackball should produce:
 
 ```text
-/userdata/system/
-/userdata/system/configs/
-/userdata/system/al3_bridge.py
+REL_X
+REL_Y
 ```
 
-A copy of the custom scripts should also be maintained in this GitHub repository.
+The volume shortcut should produce:
 
-That allows the system to be rebuilt if:
+```text
+KEY_VOLUMEUP
+KEY_VOLUMEDOWN
+```
 
-* the storage device fails
-* Batocera is reinstalled
-* the PC is replaced
-* configuration is accidentally overwritten
+If Linux already receives the correct event, troubleshooting should move higher in the stack.
 
 ---
 
-# Configuration Layers
+## SDL Testing
 
-The final system can be viewed as five configuration layers:
+After Linux input is confirmed, verify SDL.
+
+Run:
+
+```bash
+export DISPLAY=:0.0
+sdl2-jstest --list
+```
+
+A focused version is:
+
+```bash
+export DISPLAY=:0.0
+sdl2-jstest --list | grep -E 'Joystick Name|Number of Buttons|Button code'
+```
+
+The expected player devices are:
+
+```text
+AL3 Player 1
+AL3 Player 2
+```
+
+Each should expose eight buttons.
+
+The verified mappings include:
+
+```text
+Button 6 → SELECT
+Button 7 → START
+```
+
+---
+
+## Configuration Layers
+
+The final system can be viewed as separate layers:
 
 ```text
 1. Cabinet Hardware
         ↓
-2. AL3 Input Bridge
+2. Controller / FTDI Serial Interface
         ↓
-3. Linux / SDL Input
+3. AL3 Input Bridge
         ↓
-4. Batocera / MAME
+4. Linux / SDL Input
         ↓
-5. Per-Game Overrides
+5. EmulationStation / Batocera
+        ↓
+6. MAME
+        ↓
+7. Per-Game Overrides
 ```
 
 Each layer has a specific responsibility.
 
-This makes the system much easier to understand than treating every issue as a Batocera problem.
+This makes troubleshooting much easier than treating every problem as a Batocera problem.
 
 ---
 
-# Next
+## Avoiding Unnecessary Global Changes
 
-The next document is:
+The troubleshooting sequence used throughout the build is:
 
-[`controls.md`](controls.md)
+```text
+Verify hardware
+      ↓
+Verify /dev/ttyUSB0
+      ↓
+Verify AL3 bridge
+      ↓
+Verify Linux input
+      ↓
+Verify SDL
+      ↓
+Verify EmulationStation
+      ↓
+Verify MAME
+      ↓
+Verify individual game
+```
 
-That section will go deeper into the AL3 controller bridge, including:
+Only change the layer where the problem actually appears.
 
-* serial packet handling
-* joystick decoding
-* button decoding
-* Start / Coin logic
-* trackball handling
-* virtual Linux input devices
-* hotkey behavior
+For example:
+
+```text
+evtest is wrong
+→ investigate bridge / hardware
+
+evtest correct, EmulationStation wrong
+→ investigate controller mapping
+
+Most games work, one fails
+→ investigate that game
+
+One game is oversized
+→ use a per-game viewport
+```
+
+This greatly reduces the chance of solving one problem while creating several new ones.
+
+---
+
+## Configuration Persistence
+
+Custom cabinet behavior should survive:
+
+- reboot
+- shutdown
+- emulator restart
+- normal Batocera use
+
+For that reason, project-specific files are kept under:
+
+```text
+/userdata
+```
+
+Important files should be tested again after reboot to verify that the configuration remains active.
+
+---
+
+## Recommended Backup
+
+The cabinet depends on several custom files.
+
+Important backup targets include:
+
+```text
+/userdata/system/al3_bridge.py
+/userdata/system/services/AL3_Bridge
+/userdata/system/services/Force_Headphones
+/userdata/system/configs/emulationstation/es_input.cfg
+/userdata/system/batocera.conf
+```
+
+The GitHub repository also contains copies of the custom bridge, helper script, service files, documentation, and verified game overrides.
+
+This makes recovery easier if:
+
+- the Batocera storage device fails
+- Batocera is reinstalled
+- the computer is replaced
+- a configuration file is accidentally overwritten
+
+---
+
+## Final Configuration Philosophy
+
+The project ultimately follows three rules:
+
+1. **Preserve the original cabinet hardware where practical.**
+2. **Solve problems at the lowest layer where they actually exist.**
+3. **Use per-game overrides instead of global changes when only one game needs a fix.**
+
+That combination keeps the cabinet understandable and maintainable while still allowing unusual hardware such as the original Arcade Legends controller and trackball to work with Batocera.
+
+---
+
+## Related Documentation
+
+- [Installation](../INSTALL.md)
+- [Hardware Conversion](hardware.md)
+- [Controls](controls.md)
+- [Game-Specific Fixes](game-fixes.md)
+- [Troubleshooting](troubleshooting.md)
