@@ -47,7 +47,11 @@ mouse_caps = {
 }
 
 hotkey_caps = {
-    e.EV_KEY: [e.KEY_EXIT]
+    e.EV_KEY: [
+        e.KEY_EXIT,
+        e.KEY_VOLUMEUP,
+        e.KEY_VOLUMEDOWN
+    ]
 }
 
 p1 = UInput(pad_caps, name="AL3 Player 1")
@@ -150,6 +154,9 @@ p2_tracker = {"since": None, "coin_sent": False}
 last_p1 = None
 last_p2 = None
 last_exit = False
+exit_used_for_volume = False
+last_volume_key = None
+next_volume_repeat = 0.0
 
 fd = os.open(PORT, os.O_RDONLY)
 buf = bytearray()
@@ -210,7 +217,43 @@ try:
                 pressed(b2, 3)
             ]
 
-            p1_state = (p1_x, p1_y, p1_buttons)
+            # EXIT acts as a volume modifier for P1 Up/Down
+            exit_now = pressed(b4, 0)
+            volume_now = time.monotonic()
+
+            volume_key = None
+
+            if exit_now and p1_up and not p1_down:
+                volume_key = e.KEY_VOLUMEUP
+            elif exit_now and p1_down and not p1_up:
+                volume_key = e.KEY_VOLUMEDOWN
+
+            # Do not send vertical joystick movement to the game
+            # while EXIT is being used as the modifier.
+            p1_y_out = 0 if exit_now else p1_y
+
+            if exit_now and volume_key is not None:
+                exit_used_for_volume = True
+
+                # Immediate first step, then repeat while held.
+                if last_volume_key != volume_key:
+                    pulse(hotkeys, volume_key)
+                    last_volume_key = volume_key
+                    next_volume_repeat = volume_now + 0.35
+
+                elif volume_now >= next_volume_repeat:
+                    pulse(hotkeys, volume_key)
+                    next_volume_repeat = volume_now + 0.12
+
+            elif exit_now:
+                last_volume_key = None
+                next_volume_repeat = 0.0
+
+            else:
+                last_volume_key = None
+                next_volume_repeat = 0.0
+
+            p1_state = (p1_x, p1_y_out, p1_buttons)
             last_p1 = emit_pad(p1, p1_state, last_p1)
 
             # Player 2
@@ -248,21 +291,24 @@ try:
                 p2, p2_start, p2_tracker, now
             )
 
-            # Exit Game
-            exit_now = pressed(b4, 0)
+            # EXIT alone exits the game.
+            # If EXIT was used with P1 Up/Down, do not exit.
+            if last_exit and not exit_now:
+                if not exit_used_for_volume:
+                    subprocess.run(
+                        ["hotkeygen", "--send", "exit"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
 
-            if exit_now != last_exit:
-                hotkeys.write(
-                    e.EV_KEY,
-                    e.KEY_EXIT,
-                    int(exit_now)
-                )
-                hotkeys.syn()
-                last_exit = exit_now
+                exit_used_for_volume = False
+
+            last_exit = exit_now
 
             # Trackball
-            dx = signed7(pkt[5])
-            dy = signed7(pkt[6])
+            # Arcade trackball sensitivity multiplier
+            dx = signed7(pkt[5]) * 2
+            dy = signed7(pkt[6]) * 2
 
             if dx or dy:
                 if dx:
