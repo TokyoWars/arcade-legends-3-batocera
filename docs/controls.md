@@ -1,635 +1,608 @@
 # Controls and Input Bridge
 
-This section explains how the original arcade cabinet controls are translated into standard Linux input devices that Batocera and MAME can understand.
+This document explains how the original Arcade Legends 3 controls are translated into standard Linux input devices that Batocera and MAME can use.
 
-The key idea is simple:
+The goal of the project was to keep the original cabinet controls, trackball, wiring, and controller/interface electronics rather than replace everything with generic USB arcade encoders.
 
-> Keep the original cabinet controls and controller hardware, then translate their proprietary serial data into normal Linux joystick and mouse events.
-
-This avoids completely rewiring the cabinet into generic USB arcade encoders.
+The custom AL3 bridge acts as the compatibility layer between the original cabinet hardware and Linux.
 
 ---
 
-# Input Architecture
+## Input Architecture
 
-The complete path is:
+The control path is:
 
-```text
-Original buttons / joysticks / trackball
-        │
-        ▼
-Original cabinet controller
-        │
-        ▼
-Serial data
-        │
-        ▼
-FTDI USB-to-Serial adapter
-        │
-        ▼
-/dev/ttyUSB0
-        │
-        ▼
-AL3 Python Input Bridge
-        │
-        ▼
-Linux UInput virtual devices
-        │
-        ├── AL3 Player 1
-        ├── AL3 Player 2
-        ├── AL3 Trackball
-        └── AL3 Hotkeys
-        │
-        ▼
-SDL / Batocera / MAME
-```
+    Original buttons / joysticks / trackball
+                │
+                ▼
+    Original Arcade Legends controller/interface
+                │
+                ▼
+    USB connection
+                │
+                ▼
+    FTDI serial interface detected by Linux
+                │
+                ▼
+    /dev/ttyUSB0
+                │
+                ▼
+    AL3 Python input bridge
+                │
+                ▼
+    Linux UInput virtual devices
+                │
+                ├── AL3 Player 1
+                ├── AL3 Player 2
+                ├── AL3 Trackball
+                └── AL3 Hotkeys
+                │
+                ▼
+    SDL / Batocera / MAME
 
-The bridge is therefore the compatibility layer between the old arcade electronics and the modern operating system.
+The bridge allows the original proprietary cabinet controller to behave like normal Linux input hardware.
 
 ---
 
-# Serial Interface
+## Serial Interface
 
-The cabinet controller connects to the Batocera PC through an FTDI USB-to-serial adapter.
+The original Arcade Legends controller/interface connects to the Batocera computer by USB.
 
-Linux identifies it as an:
+Linux detects its FTDI serial interface as:
 
-```text
-FT232R USB UART
-```
+    FT232R USB UART
 
 and exposes it as:
 
-```text
-/dev/ttyUSB0
-```
+    /dev/ttyUSB0
 
-The controller communicates using:
+The verified working serial configuration is:
 
-```text
-115200 baud
-8 data bits
-no parity
-1 stop bit
-no hardware flow control
-```
+    115200 baud
+    8 data bits
+    no parity
+    1 stop bit
+    no hardware flow control
 
-This is commonly written as:
+or:
 
-```text
-115200 8N1
-```
+    115200 8N1
 
----
+The controller sends a continuous stream of binary data.
 
-# Packet Format
+The packet format observed during this project is:
 
-The controller sends a continuous stream of binary packets.
+    19 bytes
 
-The packets use framing bytes:
+with framing bytes:
 
-```text
-Start: 0x5A
-End:   0xA5
-```
+    Start: 0x5A
+    End:   0xA5
 
-The packet length observed during this project is:
-
-```text
-19 bytes
-```
-
-Conceptually:
-
-```text
-0x5A
-  │
-  ├── control state
-  ├── joystick state
-  ├── button state
-  ├── trackball movement
-  └── additional controller data
-  │
-0xA5
-```
-
-The Python bridge watches the serial stream, identifies valid packets, decodes the relevant fields, and converts them into Linux input events.
+The Python bridge reads this stream, identifies valid packets, decodes the relevant controls, and converts them into standard Linux input events.
 
 ---
 
-# Why Create Virtual Devices?
+## Why Virtual Linux Devices?
 
-Linux already has a standard input subsystem.
+Rather than modifying Batocera, SDL, or MAME to understand the original Arcade Legends protocol directly, the bridge uses:
 
-Instead of modifying Batocera or MAME to understand the arcade controller protocol directly, the bridge creates normal virtual Linux input devices using:
+    evdev
+    UInput
 
-```text
-evdev
-UInput
-```
+to create standard Linux input devices.
 
-The resulting devices behave like physical USB controllers from the point of view of applications.
+From the software side:
 
-That means:
+    Original proprietary controller protocol
+                ↓
+    al3_bridge.py
+                ↓
+    Normal Linux input devices
+                ↓
+    SDL
+                ↓
+    Batocera
+                ↓
+    MAME
 
-```text
-Batocera does not need to know about the serial protocol.
-
-MAME does not need to know about the serial protocol.
-
-SDL does not need to know about the serial protocol.
-```
-
-They only see normal input devices.
+Batocera and MAME therefore do not need to understand the original controller protocol.
 
 ---
 
-# Virtual Devices
+## Virtual Devices
 
 The bridge creates four logical devices.
 
-## AL3 Player 1
+### AL3 Player 1
 
-Contains:
+Provides:
 
-* joystick directions
-* Player 1 arcade buttons
-* Start
-* Select / Coin
+- Player 1 joystick directions
+- Player 1 arcade buttons
+- Start
+- Select / Coin
 
-## AL3 Player 2
+### AL3 Player 2
 
-Contains:
+Provides:
 
-* joystick directions
-* Player 2 arcade buttons
-* Start
-* Select / Coin
+- Player 2 joystick directions
+- Player 2 arcade buttons
+- Start
+- Select / Coin
 
-## AL3 Trackball
+### AL3 Trackball
 
-Contains:
+Provides relative movement:
 
-* horizontal relative movement
-* vertical relative movement
+    REL_X
+    REL_Y
 
-The trackball is presented as a mouse-style device rather than joystick axes.
+This makes the original trackball appear to Linux as a mouse-style relative input device.
 
-## AL3 Hotkeys
+### AL3 Hotkeys
 
-Contains cabinet-level functions that should remain separate from normal gameplay.
+Provides cabinet-level hotkey input separate from normal gameplay controls.
 
-For example:
+The verified bridge exposes:
 
-* exit game
-* return to EmulationStation
+    KEY_EXIT
 
-This separation makes controller configuration much cleaner.
+through this device.
+
+Keeping cabinet-level functions separate reduces the chance of accidentally assigning a normal gameplay button to a system function.
 
 ---
 
-# Joystick Handling
+## Joystick Handling
 
-The cabinet joysticks are digital arcade joysticks.
+The original cabinet joysticks are digital arcade joysticks.
 
 The bridge converts their state into standard Linux directional input.
 
-Conceptually:
+For example:
 
-```text
-Original controller says:
-Player 1 LEFT is active
+    Original controller:
+    Player 1 LEFT active
 
-        ↓
+            ↓
 
-Python bridge
+    al3_bridge.py
 
-        ↓
+            ↓
 
-Linux input event:
-Player 1 LEFT
-```
+    Linux input:
+    Player 1 LEFT
 
 The same applies to:
 
-```text
-UP
-DOWN
-LEFT
-RIGHT
-```
+    UP
+    DOWN
+    LEFT
+    RIGHT
 
 for both players.
 
-From Batocera's perspective, they are ordinary digital gamepad directions.
+From Batocera's perspective, these are normal digital controller directions.
 
 ---
 
-# Button Handling
+## Button Handling
 
 Each physical arcade button is decoded from the controller packet and mapped to a Linux joystick button.
 
-The important design principle is that the bridge performs the hardware-specific translation only once.
+The general path is:
 
-After that, button assignment is handled normally through Batocera and MAME.
+    Physical arcade button
+            ↓
+    Controller packet bit
+            ↓
+    AL3 bridge
+            ↓
+    Linux BTN event
+            ↓
+    SDL button number
+            ↓
+    Batocera / MAME
 
-For example:
+The bridge handles the hardware-specific translation once.
 
-```text
-Physical arcade button
-        ↓
-Controller packet bit
-        ↓
-AL3 bridge
-        ↓
-Linux BTN event
-        ↓
-SDL button number
-        ↓
-Batocera / MAME function
-```
-
-This layering is very useful when troubleshooting.
+After that, controller assignment is handled normally by Batocera and MAME.
 
 ---
 
-# Player Start and Coin Buttons
+## Start and Coin Without Adding Buttons
 
-One challenge was preserving the original control panel without adding more buttons.
+One of the goals of the conversion was to preserve the original control panel without drilling holes for additional Coin buttons.
 
-Modern emulators commonly expect separate controls for:
+The existing player button therefore has two software-defined behaviors.
 
-```text
-START
-SELECT / COIN
-```
+Short press:
 
-Instead of drilling another hole in the cabinet, the bridge gives the existing player button two behaviors.
+    START
 
-### Short press
+Long press of approximately one second:
 
-```text
-START
-```
-
-### Long press
-
-Approximately one second:
-
-```text
-SELECT / COIN
-```
+    SELECT / COIN
 
 Conceptually:
 
-```text
-Player button pressed
-        │
-        ├── released quickly
-        │       ↓
-        │     START
-        │
-        └── held
-                ↓
-              COIN
-```
+    Player button pressed
+            │
+            ├── released quickly
+            │       ↓
+            │     START
+            │
+            └── held about 1 second
+                    ↓
+                 COIN / SELECT
 
-This makes it possible to insert a virtual coin and start the game using the original cabinet controls.
+This allows the original physical controls to provide both emulator functions without modifying the panel.
 
 ---
 
-# Why This Is Better Than Adding Buttons
+## SDL Button Mapping
 
-The alternative would have been to add dedicated Coin buttons.
+The virtual Player 1 and Player 2 controllers expose eight buttons.
 
-That would work technically, but would require:
+The verified mappings are:
 
-* drilling the control panel
-* changing the original appearance
-* adding wiring
-* adding additional physical controls
+    SELECT = SDL button 6
+    START  = SDL button 7
 
-The software-based approach preserves the cabinet while still providing the functionality required by MAME.
+These mappings are stored in:
 
----
+    /userdata/system/configs/emulationstation/es_input.cfg
 
-# SDL Button Mapping
+The repository includes:
 
-After the virtual controllers are created, Batocera sees them through SDL.
+    scripts/update_es_input.py
 
-The final virtual controller exposes enough buttons for both normal arcade controls and Start/Select functionality.
+which updates only:
 
-During configuration, the important mappings were:
+    AL3 Player 1
+    AL3 Player 2
 
-```text
-SELECT = SDL button 6
-START  = SDL button 7
-```
+and sets:
 
-These are then stored in Batocera's EmulationStation controller configuration:
+    Button 6 → SELECT
+    Button 7 → START
 
-```text
-/userdata/system/configs/emulationstation/es_input.cfg
-```
+The important part is maintaining consistency through the whole input chain:
 
-The exact SDL button number is less important than maintaining consistency between:
-
-```text
-AL3 bridge
-    ↓
-SDL
-    ↓
-EmulationStation
-    ↓
-MAME
-```
+    AL3 bridge
+        ↓
+    SDL
+        ↓
+    EmulationStation
+        ↓
+    MAME
 
 ---
 
-# Trackball Handling
+## Trackball Handling
 
-The trackball is fundamentally different from a joystick.
+The trackball behaves differently from a joystick.
 
-A joystick represents position or direction.
+A joystick represents direction or position.
 
 A trackball represents movement.
 
 For example:
 
-```text
-Joystick:
-LEFT is pressed
+    Joystick:
+    LEFT is pressed
 
-Trackball:
-move 12 units left
-```
+    Trackball:
+    move 12 units left
 
 The AL3 bridge therefore exposes the trackball using Linux relative movement events:
 
-```text
-REL_X
-REL_Y
-```
+    REL_X
+    REL_Y
 
 This causes Linux to treat the original arcade trackball like a mouse.
 
-That is exactly what many MAME games expect.
+That is the type of input many MAME games expect.
 
 ---
 
-# Trackball Data Flow
+## Trackball Data Flow
 
-The trackball path is:
+The full trackball path is:
 
-```text
-Physical trackball movement
-        ↓
-Original controller
-        ↓
-Movement encoded in serial packet
-        ↓
-AL3 bridge calculates X/Y movement
-        ↓
-REL_X / REL_Y events
-        ↓
-AL3 Trackball
-        ↓
-MAME mouse input
-```
+    Physical trackball movement
+            ↓
+    Original Arcade Legends controller/interface
+            ↓
+    Movement encoded in serial packet
+            ↓
+    al3_bridge.py
+            ↓
+    REL_X / REL_Y
+            ↓
+    AL3 Trackball
+            ↓
+    MAME relative input
 
-This allows the original cabinet trackball to remain fully usable.
+This allows the original cabinet trackball to remain in use without rewiring it to a separate USB trackball controller.
 
 ---
 
-# Spinner and Dial Games
+## Spinner and Dial Games
 
-Some arcade games, such as Tempest, were designed around rotary controls rather than trackballs.
+Some arcade games use rotary or dial-style controls rather than a trackball.
 
-MAME commonly represents these as:
+MAME may represent those controls as:
 
-```text
-DIAL
-PADDLE
-MOUSE
-```
+    DIAL
+    PADDLE
+    MOUSE
 
-inputs depending on the machine being emulated.
+depending on the game.
 
-Because the bridge already exposes relative movement to Linux, MAME can use this input for games that need spinner-like behavior.
+Because the AL3 bridge already produces relative movement, that input can also be used by games that expect spinner-style movement.
 
-However, not every game interprets relative controls in exactly the same way.
+Some games still require a game-specific emulator setting.
 
-For that reason, games such as Tempest may still require a per-game MAME input override.
+For example, Tempest required MAME mouse input to be enabled.
 
-That is documented in:
+That configuration is documented in:
 
-[`game-fixes.md`](game-fixes.md)
+[game-fixes.md](game-fixes.md)
 
----
-
-# Hotkey Device
-
-Cabinet-level controls should not interfere with gameplay.
-
-For that reason, the bridge creates a separate device:
-
-```text
-AL3 Hotkeys
-```
-
-This can be used for functions such as:
-
-```text
-Exit game
-Return to EmulationStation
-```
-
-Keeping hotkeys separate also reduces the chance of accidentally assigning a gameplay button to a Batocera system function.
+The important design rule is to keep such fixes game-specific when the rest of the cabinet already works correctly.
 
 ---
 
-# Testing the Input Layer
+## Cabinet Exit Control
 
-Before troubleshooting MAME, it is important to verify that Linux is receiving the expected input.
+The bridge creates a separate:
 
-A useful tool is:
+    AL3 Hotkeys
 
-```bash
-evtest
-```
+device for cabinet-level system functions.
 
-List the available input devices and identify:
+The verified bridge maps the cabinet EXIT control to:
 
-```text
-AL3 Player 1
-AL3 Player 2
-AL3 Trackball
-AL3 Hotkeys
-```
+    KEY_EXIT
 
-Then select the appropriate device.
+This keeps the exit function separate from Player 1 and Player 2 gameplay buttons.
 
-For example, moving Player 1's joystick should generate directional events.
+The intended behavior is:
 
-Pressing buttons should generate button events.
-
-Moving the trackball should produce:
-
-```text
-REL_X
-REL_Y
-```
-
-events.
+    EXIT
+    → leave the current game and return to EmulationStation
 
 ---
 
-# SDL Testing
+## Cabinet Volume Control
 
-The next layer to verify is SDL.
+A cabinet-level volume-control shortcut was also used during the build so volume could be changed without adding dedicated physical volume buttons.
 
-The general troubleshooting path is:
+The intended cabinet behavior was:
 
-```text
-evtest works
-     ↓
-SDL controller test
-     ↓
-Batocera controller configuration
-     ↓
-MAME
-```
+    EXIT + Player 1 UP
+    → Volume Up
 
-If `evtest` works but SDL does not, the serial bridge itself is probably not the problem.
+    EXIT + Player 1 DOWN
+    → Volume Down
 
-If SDL works but MAME does not, the issue is probably emulator-side configuration.
+while:
+
+    EXIT alone
+    → Exit the current game
+
+This preserves the original control panel and reuses existing controls as a modifier combination.
+
+However, the current repository version of `al3_bridge.py` only exposes the EXIT control through `AL3 Hotkeys` as `KEY_EXIT`.
+
+The exact software implementation that turns:
+
+    EXIT + Player 1 UP
+    EXIT + Player 1 DOWN
+
+into system volume commands is not currently included in the repository.
+
+For that reason, this behavior is documented here as part of the working cabinet design, but it should not be assumed to be provided by `al3_bridge.py` alone.
+
+The missing volume-control implementation should be added to the repository once the exact working configuration is recovered.
 
 ---
 
-# Troubleshooting by Layer
+## Testing the Linux Input Layer
 
-This project became much easier once control problems were divided into layers.
+Before troubleshooting Batocera or MAME, verify that Linux receives the expected events.
 
-## No response from a physical button
+Run:
+
+    evtest
+
+Identify:
+
+    AL3 Player 1
+    AL3 Player 2
+    AL3 Trackball
+    AL3 Hotkeys
+
+Then test each device.
+
+Player joystick movement should generate directional events.
+
+Arcade buttons should generate button events.
+
+The trackball should generate:
+
+    REL_X
+    REL_Y
+
+The cabinet exit control should generate the event associated with:
+
+    KEY_EXIT
+
+If the expected event is visible in `evtest`, the original hardware and bridge are probably working correctly.
+
+---
+
+## SDL Testing
+
+The next layer is SDL.
+
+Run:
+
+    export DISPLAY=:0.0
+    sdl2-jstest --list
+
+Or:
+
+    export DISPLAY=:0.0
+    sdl2-jstest --list | grep -E 'Joystick Name|Number of Buttons|Button code'
+
+The expected virtual controllers include:
+
+    AL3 Player 1
+    AL3 Player 2
+
+Each should expose eight buttons.
+
+The verified mappings are:
+
+    Button 6 → SELECT
+    Button 7 → START
+
+The troubleshooting path should generally be:
+
+    evtest works
+          ↓
+    SDL controller test
+          ↓
+    EmulationStation configuration
+          ↓
+    MAME
+
+If `evtest` works but SDL does not, the serial bridge is probably not the problem.
+
+If SDL works but one MAME game does not, the issue is probably higher in the emulator/game configuration layer.
+
+---
+
+## Troubleshooting by Layer
+
+### No response from a physical control
 
 Check:
 
-```text
-button
-↓
-wiring
-↓
-original controller
-```
+    physical control
+        ↓
+    cabinet wiring
+        ↓
+    original controller/interface
 
-## `/dev/ttyUSB0` missing
+### `/dev/ttyUSB0` is missing
 
 Check:
 
-```text
-USB cable
-FTDI adapter
-USB detection
-kernel log
-```
+    USB connection
+        ↓
+    FTDI serial interface detection
+        ↓
+    kernel log
 
 Useful command:
 
-```bash
-dmesg | grep -Ei 'ftdi|ttyUSB'
-```
+    dmesg | grep -Ei 'ftdi|ttyUSB'
 
-## Serial data exists but no AL3 devices
+### `/dev/ttyUSB0` exists but no AL3 devices appear
 
 Check:
 
-```text
-al3_bridge.py
-Python dependencies
-serial port configuration
-permissions
-```
+    al3_bridge.py
+    service status
+    serial configuration
+    Python dependencies
+    permissions
 
-## `evtest` works but Batocera does not
+Useful commands:
 
-Check:
+    ps aux | grep '[a]l3_bridge.py'
 
-```text
-SDL controller detection
-es_input.cfg
-controller assignment
-```
+    batocera-services list | grep -i AL3
 
-## Batocera works but one MAME game does not
+    tail -f /userdata/system/al3_bridge.log
+
+### `evtest` works but Batocera does not
 
 Check:
 
-```text
-MAME input configuration
-game-specific override
-```
+    SDL controller detection
+    es_input.cfg
+    controller assignment
+
+### Batocera works but one MAME game does not
+
+Check:
+
+    MAME input configuration
+    game-specific override
 
 Do not change the bridge unless the problem actually exists at the bridge layer.
 
 ---
 
-# Design Principle
+## Design Principle
 
-The controls follow the same philosophy as the rest of this build:
+The controls follow the same philosophy as the rest of the conversion:
 
 > Solve each problem at the narrowest layer possible.
 
 Examples:
 
-```text
-Physical button failure
-→ hardware
+    Physical button failure
+    → hardware / wiring
 
-Wrong decoded button
-→ AL3 bridge
+    Wrong decoded control
+    → AL3 bridge
 
-Wrong Batocera assignment
-→ EmulationStation configuration
+    Wrong Start / Select assignment
+    → EmulationStation configuration
 
-Wrong MAME function
-→ MAME mapping
+    Wrong MAME function
+    → MAME mapping
 
-Only one game behaves differently
-→ per-game override
-```
+    Only one game behaves differently
+    → per-game override
 
-This avoids creating global workarounds for local problems.
+This prevents global workarounds from creating new problems elsewhere.
 
 ---
 
-# Source Code
+## Source Code
 
-The controller bridge source code will be included in:
+The working controller bridge is included as:
 
-```text
-scripts/al3_bridge.py
-```
+    scripts/al3_bridge.py
 
-The repository version should represent the working configuration used by the cabinet.
+On the cabinet it is installed as:
 
-Before changing the script, it is strongly recommended to keep a known-good copy.
+    /userdata/system/al3_bridge.py
+
+The automatic startup service is:
+
+    services/AL3_Bridge
+
+and is installed on the cabinet as:
+
+    /userdata/system/services/AL3_Bridge
+
+The repository version should remain aligned with the actual known-good cabinet configuration.
 
 ---
 
-# Next
+## Related Documentation
 
-The next document is:
-
-[`game-fixes.md`](game-fixes.md)
-
-This will use several games as examples of how game-specific issues were solved without compromising the global cabinet configuration.
-
-Examples include:
-
-* Tempest — spinner/dial input and launch behavior
-* Pac-Man — display sizing
-* Frogger — display sizing
-
-The purpose is not to document every game individually.
-
-Instead, these examples demonstrate reusable techniques for handling games that differ from the cabinet's normal configuration.
+- [Installation](../INSTALL.md)
+- [Hardware Conversion](hardware.md)
+- [Batocera Configuration](batocera-configuration.md)
+- [Game-Specific Fixes](game-fixes.md)
+- [Troubleshooting](troubleshooting.md)
