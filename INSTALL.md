@@ -1,396 +1,694 @@
 # Installation Guide
 
-This guide installs the custom Arcade Legends controller bridge and startup services on Batocera.
+This guide installs the custom Arcade Legends 3 controller bridge and startup services on Batocera.
 
 It assumes the original Arcade Legends controller/interface is connected by USB and Linux detects its FTDI serial interface as:
 
-    /dev/ttyUSB0
+```text
+/dev/ttyUSB0
+```
 
-The files in this repository were built around that working configuration.
+The files in this repository are based on the verified working configuration from the completed cabinet.
 
 ---
 
-## 1. Verify the controller interface
+## 1. Verify the Controller Interface
 
-Before installing anything, confirm that the controller's FTDI serial interface is detected.
+Before installing anything, confirm that Linux detects the controller's FTDI serial interface.
 
 Run:
 
-    dmesg | grep -i -E 'ftdi|ttyUSB'
+```bash
+dmesg | grep -i -E 'ftdi|ttyUSB'
+```
 
 You should see something similar to:
 
-    FT232R USB UART
+```text
+FT232R USB UART
+```
 
 Then check:
 
-    ls -l /dev/ttyUSB*
+```bash
+ls -l /dev/ttyUSB*
+```
 
 The expected device is:
 
-    /dev/ttyUSB0
+```text
+/dev/ttyUSB0
+```
 
 If `/dev/ttyUSB0` does not exist, stop here and troubleshoot the USB/controller connection before continuing.
 
 ---
 
-## 2. Install the AL3 controller bridge
+## 2. Install the AL3 Controller Bridge
 
 Copy:
 
-    scripts/al3_bridge.py
+```text
+scripts/al3_bridge.py
+```
 
 to:
 
-    /userdata/system/al3_bridge.py
+```text
+/userdata/system/al3_bridge.py
+```
 
 Example from another computer:
 
-    scp scripts/al3_bridge.py root@batocera:/userdata/system/al3_bridge.py
-
-Then make it executable:
-
-    chmod +x /userdata/system/al3_bridge.py
-
-The bridge is configured for:
-
-    /dev/ttyUSB0
-    115200 baud
-    8 data bits
-    no parity
-    1 stop bit
-    no hardware flow control
-
-or:
-
-    115200 8N1
-
-The script creates four Linux virtual input devices:
-
-    AL3 Player 1
-    AL3 Player 2
-    AL3 Trackball
-    AL3 Hotkeys
-
----
-
-## 3. Install the AL3 Batocera service
-
-Copy:
-
-    services/AL3_Bridge
-
-to:
-
-    /userdata/system/services/AL3_Bridge
-
-Example:
-
-    scp services/AL3_Bridge root@batocera:/userdata/system/services/AL3_Bridge
+```bash
+scp scripts/al3_bridge.py root@batocera:/userdata/system/al3_bridge.py
+```
 
 Make it executable:
 
-    chmod +x /userdata/system/services/AL3_Bridge
+```bash
+chmod +x /userdata/system/al3_bridge.py
+```
 
-Enable the service:
+The bridge is configured for:
 
-    batocera-services enable AL3_Bridge
+```text
+/dev/ttyUSB0
+115200 baud
+8 data bits
+no parity
+1 stop bit
+no hardware flow control
+```
 
-Start it:
+or:
 
-    batocera-services start AL3_Bridge
+```text
+115200 8N1
+```
 
-Verify it is enabled:
+The controller sends 19-byte packets framed by:
 
-    batocera-services list | grep -i AL3
+```text
+Start: 0x5A
+End:   0xA5
+```
 
-The expected output should include:
+The script creates four Linux virtual input devices:
 
-    AL3_Bridge;*
-
-You can also verify that the bridge process is running:
-
-    ps aux | grep '[a]l3_bridge.py'
-
-The service waits for `/dev/ttyUSB0`, starts the bridge, and restarts it if the bridge exits.
-
----
-
-## 4. Verify the Linux input devices
-
-Run:
-
-    evtest
-
-You should see devices named:
-
-    AL3 Player 1
-    AL3 Player 2
-    AL3 Trackball
-    AL3 Hotkeys
-
-Test Player 1 and Player 2 controls.
-
-The player button behavior is:
-
-    Short press
-    → START
-
-    Hold for approximately one second
-    → SELECT / COIN
-
-The trackball should generate relative input events:
-
-    REL_X
-    REL_Y
-
-If the virtual devices do not appear, check the bridge log:
-
-    tail -f /userdata/system/al3_bridge.log
+```text
+AL3 Player 1
+AL3 Player 2
+AL3 Trackball
+AL3 Hotkeys
+```
 
 ---
 
-## 5. Back up the EmulationStation controller configuration
-
-Before modifying the EmulationStation controller mapping, create a backup:
-
-    cp /userdata/system/configs/emulationstation/es_input.cfg \
-       /userdata/system/configs/emulationstation/es_input.cfg.backup
-
-The file being modified is:
-
-    /userdata/system/configs/emulationstation/es_input.cfg
-
----
-
-## 6. Install the EmulationStation mapping helper
+## 3. Install the AL3 Batocera Service
 
 Copy:
 
-    scripts/update_es_input.py
+```text
+services/AL3_Bridge
+```
 
 to:
 
-    /userdata/system/update_es_input.py
+```text
+/userdata/system/services/AL3_Bridge
+```
 
 Example:
 
-    scp scripts/update_es_input.py root@batocera:/userdata/system/update_es_input.py
+```bash
+scp services/AL3_Bridge root@batocera:/userdata/system/services/AL3_Bridge
+```
 
-Run it:
+Make it executable:
 
-    python3 /userdata/system/update_es_input.py
+```bash
+chmod +x /userdata/system/services/AL3_Bridge
+```
 
-The script updates only:
+Enable the service:
 
-    AL3 Player 1
-    AL3 Player 2
+```bash
+batocera-services enable AL3_Bridge
+```
 
-It sets:
+Start it:
 
-    Button 6 → SELECT
-    Button 7 → START
+```bash
+batocera-services start AL3_Bridge
+```
 
-and leaves unrelated controllers alone.
+Verify it is enabled:
+
+```bash
+batocera-services list | grep -i AL3
+```
+
+The expected output should include:
+
+```text
+AL3_Bridge;*
+```
+
+Verify that the bridge process is running:
+
+```bash
+ps aux | grep '[a]l3_bridge.py'
+```
+
+The service waits for `/dev/ttyUSB0`, starts the bridge, logs its output, and restarts it if it exits.
 
 ---
 
-## 7. Verify the SDL controller mappings
+## 4. Verify the Linux Input Devices
 
-Set the display variable:
+Run:
 
-    export DISPLAY=:0.0
-
-Then run:
-
-    sdl2-jstest --list
-
-Or filter the output:
-
-    sdl2-jstest --list | grep -E 'Joystick Name|Number of Buttons|Button code'
+```bash
+evtest
+```
 
 You should see:
 
-    AL3 Player 1
-    AL3 Player 2
+```text
+AL3 Player 1
+AL3 Player 2
+AL3 Trackball
+AL3 Hotkeys
+```
+
+Test Player 1 and Player 2.
+
+The player-button behavior is:
+
+```text
+Short press
+→ START
+
+Hold approximately one second
+→ SELECT / COIN
+```
+
+The trackball should generate:
+
+```text
+REL_X
+REL_Y
+```
+
+If the virtual devices do not appear, check:
+
+```bash
+tail -f /userdata/system/al3_bridge.log
+```
+
+---
+
+## 5. Verify the Trackball
+
+Select:
+
+```text
+AL3 Trackball
+```
+
+in `evtest`.
+
+Move the original cabinet trackball.
+
+You should see:
+
+```text
+REL_X
+REL_Y
+```
+
+The working bridge applies a 2× multiplier to the raw movement:
+
+```python
+dx = signed7(pkt[5]) * 2
+dy = signed7(pkt[6]) * 2
+```
+
+This is the sensitivity used on the completed cabinet.
+
+If the trackball works but feels too fast or too slow across all games, this multiplier can be adjusted.
+
+If only one game has incorrect sensitivity, investigate that game's settings before changing the bridge.
+
+---
+
+## 6. Verify the Cabinet Volume Shortcut
+
+Select:
+
+```text
+AL3 Hotkeys
+```
+
+in `evtest`.
+
+The working cabinet shortcuts are:
+
+```text
+EXIT + Player 1 UP
+→ Volume Up
+
+EXIT + Player 1 DOWN
+→ Volume Down
+```
+
+The bridge should generate:
+
+```text
+KEY_VOLUMEUP
+KEY_VOLUMEDOWN
+```
+
+The first volume step happens immediately.
+
+If the joystick remains held, repeat begins after approximately:
+
+```text
+0.35 seconds
+```
+
+and repeats approximately every:
+
+```text
+0.12 seconds
+```
+
+Player 1 vertical movement is suppressed while EXIT is held, so adjusting volume should not also move the player.
+
+---
+
+## 7. Verify the EXIT Button
+
+EXIT by itself should exit the current game.
+
+The working bridge handles EXIT on release using:
+
+```text
+hotkeygen --send exit
+```
+
+Expected behavior:
+
+```text
+EXIT
+→ Exit current game
+→ Return to EmulationStation
+```
+
+If EXIT was used together with Player 1 Up or Down for volume adjustment, releasing EXIT should **not** exit the game.
+
+---
+
+## 8. Back Up the EmulationStation Controller Configuration
+
+Before modifying the EmulationStation mapping, create a backup:
+
+```bash
+cp /userdata/system/configs/emulationstation/es_input.cfg \
+   /userdata/system/configs/emulationstation/es_input.cfg.backup
+```
+
+The file being modified is:
+
+```text
+/userdata/system/configs/emulationstation/es_input.cfg
+```
+
+---
+
+## 9. Install the EmulationStation Mapping Helper
+
+Copy:
+
+```text
+scripts/update_es_input.py
+```
+
+to:
+
+```text
+/userdata/system/update_es_input.py
+```
+
+Example:
+
+```bash
+scp scripts/update_es_input.py root@batocera:/userdata/system/update_es_input.py
+```
+
+Run it:
+
+```bash
+python3 /userdata/system/update_es_input.py
+```
+
+The script updates only:
+
+```text
+AL3 Player 1
+AL3 Player 2
+```
+
+It sets:
+
+```text
+Button 6 → SELECT
+Button 7 → START
+```
+
+and leaves unrelated controllers unchanged.
+
+---
+
+## 10. Verify the SDL Controller Mappings
+
+Set the display variable:
+
+```bash
+export DISPLAY=:0.0
+```
+
+Then run:
+
+```bash
+sdl2-jstest --list
+```
+
+Or:
+
+```bash
+sdl2-jstest --list | grep -E 'Joystick Name|Number of Buttons|Button code'
+```
+
+You should see:
+
+```text
+AL3 Player 1
+AL3 Player 2
+```
 
 Each virtual player controller should expose eight buttons.
 
-The verified button mappings are:
+The verified mappings are:
 
-    Button 6 → SELECT
-    Button 7 → START
+```text
+Button 6 → SELECT
+Button 7 → START
+```
 
-This is the important check before moving on to emulator-specific troubleshooting.
+If Linux input is correct but SDL is not, troubleshoot SDL or the EmulationStation mapping rather than the serial bridge.
 
 ---
 
-## 8. Reboot and verify persistence
+## 11. Reboot and Verify Persistence
 
 Reboot Batocera:
 
-    reboot
+```bash
+reboot
+```
 
-After the system comes back up, verify:
+After the system returns, verify:
 
-    batocera-services list | grep -i AL3
+```bash
+batocera-services list | grep -i AL3
+```
 
 and:
 
-    ps aux | grep '[a]l3_bridge.py'
+```bash
+ps aux | grep '[a]l3_bridge.py'
+```
 
 The bridge should start automatically.
 
-You can also run:
+Run:
 
-    evtest
+```bash
+evtest
+```
 
-again to confirm that the AL3 virtual input devices return after reboot.
+again and confirm that:
+
+```text
+AL3 Player 1
+AL3 Player 2
+AL3 Trackball
+AL3 Hotkeys
+```
+
+are present after reboot.
 
 ---
 
-## 9. Install the audio service if needed
+## 12. Install the Audio Service if Needed
 
 The cabinet used for this project required Batocera to force the analog headphone output after boot.
 
 Copy:
 
-    services/Force_Headphones
+```text
+services/Force_Headphones
+```
 
 to:
 
-    /userdata/system/services/Force_Headphones
+```text
+/userdata/system/services/Force_Headphones
+```
 
 Example:
 
-    scp services/Force_Headphones root@batocera:/userdata/system/services/Force_Headphones
+```bash
+scp services/Force_Headphones root@batocera:/userdata/system/services/Force_Headphones
+```
 
 Make it executable:
 
-    chmod +x /userdata/system/services/Force_Headphones
+```bash
+chmod +x /userdata/system/services/Force_Headphones
+```
 
 Enable it:
 
-    batocera-services enable Force_Headphones
+```bash
+batocera-services enable Force_Headphones
+```
 
 Start it:
 
-    batocera-services start Force_Headphones
+```bash
+batocera-services start Force_Headphones
+```
 
 Verify it is enabled:
 
-    batocera-services list | grep -i Headphones
+```bash
+batocera-services list | grep -i Headphones
+```
 
 The expected output should include:
 
-    Force_Headphones;*
+```text
+Force_Headphones;*
+```
 
 ---
 
-## 10. Verify the audio output
+## 13. Verify the Audio Output
 
 The included service uses this sink:
 
-    alsa_output.pci-0000_00_1f.3.analog-stereo
+```text
+alsa_output.pci-0000_00_1f.3.analog-stereo
+```
 
 and selects:
 
-    analog-output-headphones
+```text
+analog-output-headphones
+```
 
-Verify the current active port with:
+Check the current active port:
 
-    pactl list sinks | grep "Active Port"
+```bash
+pactl list sinks | grep "Active Port"
+```
 
-You should see:
+The working cabinet reports:
 
-    Active Port: analog-output-headphones
+```text
+Active Port: analog-output-headphones
+```
 
-Important:
+The sink name in `services/Force_Headphones` is specific to the Batocera computer used in this project.
 
-The sink name in `services/Force_Headphones` is specific to the Batocera computer used in this build.
+Another computer may use a different sink.
 
-Another PC may use a different sink name.
+List available sinks with:
 
-To inspect available sinks, run:
+```bash
+pactl list short sinks
+```
 
-    pactl list short sinks
+If your sink differs, edit:
 
-If your sink name differs, edit:
-
-    /userdata/system/services/Force_Headphones
+```text
+/userdata/system/services/Force_Headphones
+```
 
 and change:
 
-    SINK="alsa_output.pci-0000_00_1f.3.analog-stereo"
+```bash
+SINK="alsa_output.pci-0000_00_1f.3.analog-stereo"
+```
 
-to the correct value for your system.
+to the correct sink for your system.
 
 ---
 
-## 11. Apply game-specific overrides only when needed
+## 14. Apply Game-Specific Overrides Only When Needed
 
 Verified examples are included in:
 
-    config/game-overrides.conf
-
-These settings are intended as examples of solving specific game issues without changing global emulator behavior.
+```text
+config/game-overrides.conf
+```
 
 Examples include:
 
-- Tempest — relative mouse/spinner input
-- Pac-Man — CRT viewport adjustment
-- Frogger — CRT viewport adjustment
+```text
+Tempest
+→ relative mouse/spinner input
+
+Pac-Man
+→ CRT viewport adjustment
+
+Frogger
+→ CRT viewport adjustment
+```
 
 The settings can be added to:
 
-    /userdata/system/batocera.conf
+```text
+/userdata/system/batocera.conf
+```
 
 Only apply the overrides you actually need.
 
+The exact viewport values used on this cabinet are cabinet-specific and should not automatically be copied to another CRT.
+
 For details, see:
 
-    docs/game-fixes.md
+[Game-Specific Fixes](docs/game-fixes.md)
 
 ---
 
-## 12. Final functional test
+## 15. Final Functional Test
 
-After reboot, verify the complete control path.
+After reboot, verify the complete cabinet.
 
-### Player controls
+### Player 1
 
 Test:
 
-- Player 1 joystick
-- Player 1 buttons
-- Player 2 joystick
-- Player 2 buttons
+- joystick Up
+- joystick Down
+- joystick Left
+- joystick Right
+- all arcade buttons
+- Start
+- Coin
 
-### Start and Coin behavior
+### Player 2
+
+Test:
+
+- joystick Up
+- joystick Down
+- joystick Left
+- joystick Right
+- all arcade buttons
+- Start
+- Coin
+
+### Start and Coin
 
 Verify:
 
-    Tap player button
-    → START
+```text
+Tap player button
+→ START
 
-    Hold approximately one second
-    → SELECT / COIN
+Hold approximately one second
+→ SELECT / COIN
+```
 
 ### Trackball
 
-Verify the trackball moves correctly in a supported game or through Linux input testing.
+Verify that the original trackball moves correctly.
 
-### Exit / hotkey behavior
+The working bridge uses the 2× movement multiplier.
 
-Verify the cabinet exit control behaves as expected.
+### Volume
+
+Verify:
+
+```text
+EXIT + P1 UP
+→ Volume Up
+
+EXIT + P1 DOWN
+→ Volume Down
+```
+
+Confirm that Player 1 does not also move vertically while changing volume.
+
+### EXIT
+
+Verify:
+
+```text
+EXIT
+→ Exit game
+```
+
+Then verify that changing volume does **not** accidentally exit the game.
 
 ### Audio
 
-Confirm that cabinet audio is present and that the intended analog output is active.
+Confirm that cabinet audio is present and:
+
+```text
+analog-output-headphones
+```
+
+is active.
 
 ### Video
 
-Confirm that Batocera is displaying correctly on the original CRT.
+Confirm that Batocera displays correctly on the original CRT.
+
+### Game-specific behavior
+
+Test at least:
+
+- one normal joystick game
+- one trackball or relative-input game
+- one vertical game
+
+This helps verify the different configuration layers independently.
 
 ---
 
@@ -398,60 +696,90 @@ Confirm that Batocera is displaying correctly on the original CRT.
 
 If the controller is not detected:
 
-    ls -l /dev/ttyUSB*
+```bash
+ls -l /dev/ttyUSB*
+```
 
 and:
 
-    dmesg | grep -i -E 'ftdi|ttyUSB'
+```bash
+dmesg | grep -i -E 'ftdi|ttyUSB'
+```
 
 If `/dev/ttyUSB0` is missing, troubleshoot the USB/controller connection first.
 
 If `/dev/ttyUSB0` exists but the AL3 devices do not appear:
 
-    ps aux | grep '[a]l3_bridge.py'
+```bash
+ps aux | grep '[a]l3_bridge.py'
+```
 
 and:
 
-    tail -f /userdata/system/al3_bridge.log
+```bash
+tail -f /userdata/system/al3_bridge.log
+```
 
 If the AL3 devices appear in Linux but EmulationStation mappings are wrong:
 
-    export DISPLAY=:0.0
-    sdl2-jstest --list
+```bash
+export DISPLAY=:0.0
+sdl2-jstest --list
+```
 
-Then verify the `es_input.cfg` mappings.
+Then verify:
 
-If EmulationStation works but one game does not, move troubleshooting to the emulator or per-game configuration layer rather than changing the controller bridge.
+```text
+/userdata/system/configs/emulationstation/es_input.cfg
+```
 
-For the full troubleshooting workflow, see:
+If the volume shortcut produces no events, test:
 
-    docs/troubleshooting.md
+```text
+AL3 Hotkeys
+```
+
+with `evtest`.
+
+If EXIT works by itself but also exits while adjusting volume, verify that the running bridge contains the `exit_used_for_volume` logic.
+
+If EmulationStation works but only one game has a problem, move troubleshooting to the emulator or per-game configuration layer rather than changing the controller bridge.
+
+For the complete workflow, see:
+
+[Troubleshooting](docs/troubleshooting.md)
 
 ---
 
-## Installed files
+## Installed Files
 
 A completed installation should include:
 
-    /userdata/system/al3_bridge.py
-    /userdata/system/update_es_input.py
-    /userdata/system/services/AL3_Bridge
-    /userdata/system/services/Force_Headphones
-    /userdata/system/configs/emulationstation/es_input.cfg
+```text
+/userdata/system/al3_bridge.py
+/userdata/system/update_es_input.py
+/userdata/system/services/AL3_Bridge
+/userdata/system/services/Force_Headphones
+/userdata/system/configs/emulationstation/es_input.cfg
+```
 
-The game-specific settings used by this cabinet are stored in:
+The game-specific settings used by the cabinet are stored in:
 
-    /userdata/system/batocera.conf
+```text
+/userdata/system/batocera.conf
+```
 
 The bridge log is:
 
-    /userdata/system/al3_bridge.log
+```text
+/userdata/system/al3_bridge.log
+```
 
 ---
 
-## Next steps
+## Documentation
 
-Once the installation is working, see:
+Once installation is complete, see:
 
 - [Hardware Conversion](docs/hardware.md)
 - [Batocera Configuration](docs/batocera-configuration.md)
